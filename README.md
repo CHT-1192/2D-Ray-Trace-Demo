@@ -29,7 +29,7 @@ npm start                 # http://127.0.0.1:5173
 - `npm run dev` —— 监听 `src/`、`public/`，改动自动重建 + 页面自动刷新
 - `npm run build` —— 产出 `dist/`（站点）与 `dist/standalone.html`（**单文件版**）
 - `npm test` —— 几何 / 可见性 / 生成器自检（Node 里跑，33 项）
-- `npm run verify` —— Playwright + Chromium 端到端验证（56 项，见下文）
+- `npm run verify` —— Playwright + Chromium 端到端验证（62 项，见下文）
 - `npm run typecheck` —— `tsc --noEmit`
 
 **单文件版**：直接双击 `dist/standalone.html`（CSS/JS 全部内联，`file://` 可用，无需服务器与构建）。
@@ -40,7 +40,7 @@ npm start                 # http://127.0.0.1:5173
 | 键 | 作用 | 键 | 作用 |
 | --- | --- | --- | --- |
 | `1` / `2` / `3` | 切换 exact / edge±ε / uniform 算法 | `R` | 显示调试射线 |
-| `Space` | 暂停 | `M` | 光源跟随鼠标 |
+| `Space` | 暂停 | `M` | 光源跟随鼠标（光标进方块会提示"光源被挡住"） |
 | `←` / `→` | 速度 ∓10 | `B` | 显示/隐藏方块（看可见多边形本体） |
 | `N` | 换一个随机种子 | `A` | 高级参数面板 |
 | `H` | 隐藏面板 | `Esc` | 关闭高级面板 |
@@ -156,7 +156,7 @@ npm start                 # http://127.0.0.1:5173
 
 ```bash
 npm test            # 39 项：算法 + 生成器 + 可复现性（Node，无需浏览器）
-npm run verify      # 56 项：Playwright + Chromium 端到端
+npm run verify      # 62 项：Playwright + Chromium 端到端
 ```
 
 `npm test`：
@@ -179,6 +179,8 @@ npm run verify      # 56 项：Playwright + Chromium 端到端
   「恢复默认值」后画面与改动前**逐像素一致**；
 - **多重阴影**：约 32% 的画面被 ≥2 个方块挡住；逐点核对亮度符合 `bgFar + amp·f·dsⁿ` 模型
   （n=0/1/2 三个采样点最大误差 0.8/255）；把「阴影深度」调到 0 后阴影不再累积；
+- **光源跟随鼠标 + 光标进入方块**：判定为遮挡、HUD 给出提示、灯泡画在光标位置（偏差 1.4px）、
+  在方块内部移动光标画面仍更新、移出后恢复照明；
 - 硬阴影：半径 150 的圆环上同时存在亮区与阴影区，亮度差 > 25（实测 145 vs 61）；
 - 三种算法渲染结果确实不同（exact 与 edge 的差异远小于与 uniform 的差异）；
 - **真实时间下 1 秒后每个方块都向右平移了 速度×时间**（12/12 命中）；

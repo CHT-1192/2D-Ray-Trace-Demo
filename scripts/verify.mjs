@@ -205,6 +205,25 @@ const check = (name, ok, detail = '') => {
 };
 const section = (t) => console.log(`\n\u001b[1m${t}\u001b[0m`);
 
+/** 最亮像素的位置与亮度（用来定位灯泡） */
+function brightestPixel(img) {
+  let best = -1;
+  let bx = 0;
+  let by = 0;
+  for (let y = 0; y < img.h; y++) {
+    for (let x = 0; x < img.w; x++) {
+      const i = (y * img.w + x) * 4;
+      const v = 0.299 * img.data[i] + 0.587 * img.data[i + 1] + 0.114 * img.data[i + 2];
+      if (v > best) {
+        best = v;
+        bx = x;
+        by = y;
+      }
+    }
+  }
+  return { x: bx, y: by, value: Math.round(best) };
+}
+
 /** 整图平均灰度（判断整体明暗变化用） */
 function meanGray(img) {
   let sum = 0;
@@ -976,6 +995,73 @@ check(
   spread < 40,
   `各层采样点亮度 ${flatSamples.join('/')}，极差 ${spread}`,
 );
+
+section('12. 光源跟随鼠标 · 光标进入方块内部');
+await hideUi();
+await page.evaluate(() => {
+  const api = window.__RT2D__;
+  api.opts.paused = true;
+  api.opts.followMouse = true;
+  api.opts.debugRays = false;
+  api.opts.showBlocks = true;
+  api.settings.lightX = 0.5;
+  api.settings.lightY = 325 / 685;
+  api.applySeed(20260910);
+  api.relayout();
+});
+await waitFrames(4);
+
+const blockRect = await page.evaluate(() => {
+  const inst = window.__RT2D__.scene.instances[0];
+  return { x: Math.round(inst.x), y: Math.round(inst.y), w: Math.round(inst.w), h: Math.round(inst.h) };
+});
+const insideA = { x: blockRect.x + Math.round(blockRect.w * 0.3), y: blockRect.y + Math.round(blockRect.h * 0.3) };
+const insideB = { x: blockRect.x + Math.round(blockRect.w * 0.75), y: blockRect.y + Math.round(blockRect.h * 0.75) };
+
+await page.mouse.move(insideA.x, insideA.y);
+await waitFrames(4);
+const insideShot = await shoot('25-follow-inside');
+const stateInside = await page.evaluate(() => ({
+  occluded: window.__RT2D__.scene.occludedAt(window.__RT2D__.scene.light.x, window.__RT2D__.scene.light.y),
+  vertices: window.__RT2D__.stats.vertices,
+  warnVisible: !document.querySelector('[data-warn]').hidden,
+}));
+check('光标在方块内时判定为「光源被遮挡」', stateInside.occluded && stateInside.vertices === 0, `顶点 ${stateInside.vertices}`);
+check('HUD 给出了「光源被方块挡住」的提示', stateInside.warnVisible);
+
+// 这条是关键回归：曾经因为顶点缓冲没上传，叠加层一直用上一帧的数据画，
+// 表现为画面冻住、灯泡停在旧位置。
+const glowA = brightestPixel(insideShot.img);
+const distA = Math.hypot(glowA.x - insideA.x, glowA.y - insideA.y);
+check(
+  '灯泡画在光标位置（叠加层不是上一帧的旧数据）',
+  distA <= 6,
+  `最亮点 (${glowA.x},${glowA.y}) vs 光标 (${insideA.x},${insideA.y})，偏差 ${distA.toFixed(1)}px`,
+);
+
+// 在同一个方块内部换个位置：画面必须跟着变
+await page.mouse.move(insideB.x, insideB.y);
+await waitFrames(4);
+const movedShot = await shoot('26-follow-inside-moved');
+const glowB = brightestPixel(movedShot.img);
+const distB = Math.hypot(glowB.x - insideB.x, glowB.y - insideB.y);
+check('在方块内部移动光标，画面仍然更新', distB <= 6 && meanAbsDiff(insideShot.img, movedShot.img).changedRatio > 0.0002,
+  `最亮点 (${glowB.x},${glowB.y}) 偏差 ${distB.toFixed(1)}px，${(meanAbsDiff(insideShot.img, movedShot.img).changedRatio * 100).toFixed(2)}% 像素变化`);
+
+// 移出方块：画面恢复照明（挪到画面正中，那里一定是亮的）
+await page.mouse.move(600, 420);
+await waitFrames(4);
+const outsideShot = await shoot('27-follow-outside');
+check(
+  '光标移出方块后画面恢复照明',
+  meanGray(outsideShot.img) - meanGray(movedShot.img) > 10,
+  `整图均值 ${meanGray(movedShot.img).toFixed(1)} → ${meanGray(outsideShot.img).toFixed(1)}`,
+);
+check('提示随之消失', await page.evaluate(() => document.querySelector('[data-warn]').hidden));
+
+await page.evaluate(() => {
+  window.__RT2D__.opts.followMouse = false;
+});
 
 await browser.close();
 ownServer?.kill();

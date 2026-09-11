@@ -235,8 +235,10 @@ export class WebGL2Renderer implements Renderer {
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
 
+    // 注意：无论有没有本影都要上传 —— 叠加层复用同一份缓冲，
+    // 漏上传的话叠加层会拿上一帧的旧数据画（表现为"光源埋在方块里时画面冻住"）。
+    this.uploadMesh();
     if (this.umbraVerts > 0) {
-      this.uploadMesh();
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.ONE, gl.ONE);
       gl.useProgram(this.flatProg);

@@ -88,6 +88,8 @@ const TEMPLATE = /* html */ `
     <select data-select="epsilon"></select>
   </label>
 
+  <p class="warn" data-warn hidden>光源被方块挡住 · 没有可见区域</p>
+
   <label class="row row-seed">
     <span>种子</span>
     <input type="number" data-seed min="0" max="2147483647" step="1" spellcheck="false" />
@@ -135,8 +137,10 @@ export class Hud {
   private readonly note: HTMLElement;
   private readonly epsilonSelect: HTMLSelectElement;
   private readonly seedInput: HTMLInputElement;
+  private readonly warn: HTMLElement;
   private seed = 0;
   private hidden = false;
+  private blackout = false;
 
   constructor(root: HTMLElement, private opts: Options, actions: HudActions) {
     this.root = root;
@@ -187,6 +191,7 @@ export class Hud {
       input.addEventListener('change', () => this.actions.onFlag(key, input.checked));
     }
 
+    this.warn = q<HTMLElement>('[data-warn]');
     this.seedInput = q<HTMLInputElement>('[data-seed]');
     const applySeed = () => {
       const v = Number(this.seedInput.value);
@@ -213,6 +218,13 @@ export class Hud {
       el.textContent = short;
       el.setAttribute('title', full);
     }
+  }
+
+  /** 光源被方块埋住时给个明确提示，免得以为是卡住了。 */
+  setBlackout(on: boolean): void {
+    if (on === this.blackout) return;
+    this.blackout = on;
+    this.warn.hidden = !on;
   }
 
   /** 面板当前是否可见（隐藏时就没必要测耗时了）。 */

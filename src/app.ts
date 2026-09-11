@@ -162,6 +162,8 @@ function boot(): void {
     const visMs = needTiming ? solveMeter.sample() : solveMeter.value;
     if (blackout) vis.reset(); // 光源被方块压住：整个房间只剩环境光
 
+    hud.setBlackout(blackout);
+
     const model: RenderModel = {
       worldW,
       worldH,
