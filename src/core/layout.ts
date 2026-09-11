@@ -59,35 +59,6 @@ export const ASPECT_FIT = { mu: 0.51, sigma: 0.304, min: 0.9, max: 3.2 } as cons
 /** 高度实测 60~136，两端各放宽一点。 */
 export const HEIGHT_RANGE = { min: 46, max: 150 } as const;
 
-/** 从拟合出来的分布里采一个尺寸（单位：参考坐标系像素）。 */
-export function sampleSize(rng: () => number): { w: number; h: number } {
-  let r = rng();
-  let cls = SIZE_CLASSES[SIZE_CLASSES.length - 1];
-  for (const c of SIZE_CLASSES) {
-    if (r < c.weight) {
-      cls = c;
-      break;
-    }
-    r -= c.weight;
-  }
-  const w = cls.min + rng() * (cls.max - cls.min);
-
-  // 长宽比取自对数正态；若算出来的高度越界就重采几次，
-  // 避免所有极端宽度都被夹到同一个高度、在边界上堆成一堆。
-  let h = w / Math.exp(ASPECT_FIT.mu);
-  for (let attempt = 0; attempt < 6; attempt++) {
-    // Box–Muller 取标准正态 → 取指数得到对数正态
-    const u1 = Math.max(1e-9, rng());
-    const u2 = rng();
-    const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
-    const aspect = Math.min(ASPECT_FIT.max, Math.max(ASPECT_FIT.min, Math.exp(ASPECT_FIT.mu + ASPECT_FIT.sigma * z)));
-    h = w / aspect;
-    if (h >= HEIGHT_RANGE.min && h <= HEIGHT_RANGE.max) break;
-  }
-  h = Math.min(HEIGHT_RANGE.max, Math.max(HEIGHT_RANGE.min, h));
-  return { w: Math.round(w), h: Math.round(h) };
-}
-
 /**
  * 水平放置带：把参考图的 16 个方块按 y 聚类（在最大的垂直空隙处切开）得到上下两条带。
  * 带与带 y 区间不重叠 ⇒ 跨带永不相交，只有带内需要碰撞检测。

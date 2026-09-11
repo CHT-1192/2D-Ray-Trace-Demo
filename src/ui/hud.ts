@@ -21,6 +21,8 @@ export interface HudActions {
   onSeed(seed: number): void;
   /** 换一个随机种子 */
   onRandomSeed(): void;
+  /** 开关高级参数面板 */
+  onToggleAdvanced(): void;
   onToggleHud(): void;
 }
 
@@ -100,6 +102,7 @@ const TEMPLATE = /* html */ `
     <label><input type="checkbox" data-flag="paused"><span>暂停滚动</span></label>
   </div>
 
+  <button type="button" class="advanced-toggle" data-action="advanced">高级参数<em>A</em></button>
 </div>
 <div class="hint">
   <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> 算法 ·
@@ -109,6 +112,7 @@ const TEMPLATE = /* html */ `
   <kbd>M</kbd> 跟随鼠标 ·
   <kbd>B</kbd> 方块 ·
   <kbd>N</kbd> 换种子 ·
+  <kbd>A</kbd> 高级参数 ·
   <kbd>H</kbd> 面板
 </div>
 `;
@@ -197,6 +201,7 @@ export class Hud {
       }
     });
     q<HTMLButtonElement>('[data-action="dice"]').addEventListener('click', () => this.actions.onRandomSeed());
+    q<HTMLButtonElement>('[data-action="advanced"]').addEventListener('click', () => this.actions.onToggleAdvanced());
 
     this.sync();
   }

@@ -1,9 +1,11 @@
-import { DEFAULT_OPTIONS, DEFAULT_SEED, THEME, WORLD_H, type Options } from './config';
+import { DEFAULT_OPTIONS, DEFAULT_SEED, WORLD_H, type Options } from './config';
 import { Scene } from './core/scene';
 import { Visibility, VisibilityEngine } from './core/visibility';
 import { createRenderer } from './render';
 import type { RenderModel } from './render/types';
+import { settings, type Settings } from './settings';
 import { CostMeter } from './timing';
+import { AdvancedPanel } from './ui/advanced-panel';
 import { Hud, type Stats } from './ui/hud';
 import { attachInput } from './ui/input';
 
@@ -11,7 +13,8 @@ import { attachInput } from './ui/input';
 function boot(): void {
   const initialCanvas = document.getElementById('stage');
   const uiRoot = document.getElementById('ui');
-  if (!(initialCanvas instanceof HTMLCanvasElement) || !uiRoot) throw new Error('页面结构不完整');
+  const advRoot = document.getElementById('advanced');
+  if (!(initialCanvas instanceof HTMLCanvasElement) || !uiRoot || !advRoot) throw new Error('页面结构不完整');
 
   const { renderer, canvas } = createRenderer(initialCanvas);
   const scene = new Scene();
@@ -81,8 +84,26 @@ function boot(): void {
     onRandomSeed() {
       applySeed(randomSeed());
     },
+    onToggleAdvanced() {
+      advanced.toggle();
+    },
     onToggleHud() {
       hud.toggle();
+    },
+  });
+
+  const advanced = new AdvancedPanel(advRoot, {
+    onChange(key: keyof Settings) {
+      // 光源位置变了要重算光照几何；其余参数渲染时每帧现读，改完即生效
+      if (key === 'lightX' || key === 'lightY' || key === 'wallMargin') relayout();
+      solveMeter.invalidate();
+    },
+    onReset() {
+      relayout();
+      solveMeter.invalidate();
+    },
+    onClose() {
+      advanced.toggle(false);
     },
   });
   const backendName = renderer.backend === 'webgl2' ? 'WebGL2' : 'Canvas 2D';
@@ -113,7 +134,7 @@ function boot(): void {
     if (opts.followMouse && pointer.inside) {
       return { x: pointer.x * worldW, y: pointer.y * worldH };
     }
-    return scene.light;
+    return { x: worldW * settings.lightX, y: worldH * settings.lightY };
   }
 
   let last = performance.now();
@@ -205,6 +226,12 @@ function boot(): void {
         case 'KeyN':
           applySeed(randomSeed());
           break;
+        case 'KeyA':
+          advanced.toggle();
+          return;
+        case 'Escape':
+          if (advanced.visible) advanced.toggle(false);
+          return;
         case 'KeyH':
           hud.toggle();
           return;
@@ -238,7 +265,8 @@ function boot(): void {
     stats,
     relayout,
     solveMeter,
-    theme: THEME,
+    settings,
+    theme: settings,
     applySeed,
     getSeed: () => scene.seed,
   };

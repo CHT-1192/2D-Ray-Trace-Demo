@@ -11,9 +11,9 @@ import {
   SIZE_CLASSES,
   layoutIsDisjoint,
   rectsOverlap,
-  sampleSize,
   type Rect,
 } from '../src/core/layout';
+import { settings, sampleSize } from '../src/settings';
 import { makeRng } from '../src/core/math';
 import { Scene } from '../src/core/scene';
 import { makeRayHit, rayCast, type Segment } from '../src/core/segment';

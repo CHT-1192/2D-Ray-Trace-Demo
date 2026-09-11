@@ -341,3 +341,212 @@ kbd {
     display: none;
   }
 }
+
+/* ── 高级参数面板 ─────────────────────────────────────────── */
+
+#advanced {
+  position: fixed;
+  top: 18px;
+  /* .panel 带 left:18px，这里必须显式 auto 掉，否则同时给了 left/right 会按 left 定位 */
+  left: auto;
+  right: 18px;
+  z-index: 11;
+  display: flex;
+  flex-direction: column;
+  width: 288px;
+  max-height: calc(100vh - 36px);
+  padding: 12px 12px 10px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
+  backdrop-filter: blur(16px) saturate(1.3);
+  -webkit-backdrop-filter: blur(16px) saturate(1.3);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5);
+  pointer-events: auto;
+  user-select: none;
+}
+
+#advanced[hidden] {
+  display: none;
+}
+
+.panel-adv header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.panel-adv h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.panel-adv .close {
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--dim);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.panel-adv .close:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.adv-note {
+  margin: 6px 2px 8px;
+  font-size: 10px;
+  color: #7e828b;
+}
+
+.adv-groups {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin: 0 -4px;
+  padding: 0 4px;
+}
+
+.adv-groups::-webkit-scrollbar {
+  width: 8px;
+}
+
+.adv-groups::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 8px;
+  background-clip: padding-box;
+  background-color: rgba(255, 255, 255, 0.16);
+}
+
+.adv-groups details {
+  border-top: 1px solid var(--line);
+}
+
+.adv-groups details:first-child {
+  border-top: 0;
+}
+
+.adv-groups summary {
+  padding: 7px 2px;
+  font-size: 11px;
+  color: #b9bdc6;
+  cursor: pointer;
+  list-style: none;
+}
+
+.adv-groups summary::-webkit-details-marker {
+  display: none;
+}
+
+.adv-groups summary::before {
+  content: '▸';
+  display: inline-block;
+  width: 12px;
+  color: var(--accent-dim);
+  transition: transform 0.15s ease;
+}
+
+.adv-groups details[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.adv-group-note {
+  margin: 0 2px 6px 14px;
+  font-size: 9.5px;
+  line-height: 1.5;
+  color: #6f737c;
+}
+
+.knob {
+  display: grid;
+  grid-template-columns: 72px 1fr 46px;
+  align-items: center;
+  gap: 6px;
+  margin: 5px 0 5px 14px;
+  font-size: 10.5px;
+  color: var(--dim);
+}
+
+.knob b {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--text);
+  text-align: right;
+}
+
+.panel-adv footer {
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.panel-adv .reset {
+  width: 100%;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 10.5px;
+  cursor: pointer;
+}
+
+.panel-adv .reset:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 207, 122, 0.4);
+}
+
+.advanced-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: 100%;
+  margin-top: 12px;
+  padding: 7px 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 10.5px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.advanced-toggle em {
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 9px;
+  font-style: normal;
+  line-height: 14px;
+}
+
+.advanced-toggle:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 207, 122, 0.4);
+}
+
+/* 窄屏放不下并排两张面板：高级面板改成整屏浮层，盖住主面板，关掉即恢复 */
+@media (max-width: 900px) {
+  #advanced {
+    top: 10px;
+    bottom: 10px;
+    left: 10px;
+    right: 10px;
+    width: auto;
+    max-height: none;
+  }
+}

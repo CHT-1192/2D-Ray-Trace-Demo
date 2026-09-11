@@ -1,4 +1,4 @@
-import { THEME } from '../config';
+import { settings } from '../settings';
 
 /**
  * 三角形的动态顶点缓冲（pos.xy + rgba），两个后端共用同一套「几何组装」逻辑。
@@ -109,7 +109,7 @@ export function falloffStops(radius: number, power: number, scale: number, steps
     const t = i / steps;
     const d = t * radius;
     const f = d >= radius ? 0 : Math.pow(1 - d / radius, power);
-    out.push([t, f * scale * THEME.glowAmp]);
+    out.push([t, f * scale * settings.glowAmp]);
   }
   return out;
 }

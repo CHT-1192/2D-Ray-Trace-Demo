@@ -1,4 +1,4 @@
-import { THEME } from '../config';
+import { blockFill, bulbStops, settings } from '../settings';
 import { MeshBuilder } from './mesh';
 import { BG_FRAG, FLAT_FRAG, FLAT_VERT, LIT_FRAG, POS_VERT } from './shaders';
 import type { RenderModel, Renderer } from './types';
@@ -158,11 +158,11 @@ export class WebGL2Renderer implements Renderer {
     gl.useProgram(this.bgProg);
     gl.uniform2f(this.bgU.u_world, model.worldW, model.worldH);
     gl.uniform2f(this.bgU.u_light, model.light.x, model.light.y);
-    gl.uniform1f(this.bgU.u_bgFar, THEME.bgFar);
-    gl.uniform1f(this.bgU.u_glowAmp, THEME.glowAmp);
-    gl.uniform1f(this.bgU.u_glowRadius, THEME.glowRadius);
-    gl.uniform1f(this.bgU.u_glowPower, THEME.glowPower);
-    gl.uniform1f(this.bgU.u_ambShare, 1 - THEME.directShare);
+    gl.uniform1f(this.bgU.u_bgFar, settings.bgFar);
+    gl.uniform1f(this.bgU.u_glowAmp, settings.glowAmp);
+    gl.uniform1f(this.bgU.u_glowRadius, settings.glowRadius);
+    gl.uniform1f(this.bgU.u_glowPower, settings.glowPower);
+    gl.uniform1f(this.bgU.u_ambShare, 1 - settings.directShare);
     gl.bindVertexArray(this.quadVao);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.quadBuf);
     const w = model.worldW;
@@ -198,10 +198,10 @@ export class WebGL2Renderer implements Renderer {
     gl.useProgram(this.litProg);
     gl.uniform2f(this.litU.u_world, model.worldW, model.worldH);
     gl.uniform2f(this.litU.u_light, lx, ly);
-    gl.uniform1f(this.litU.u_glowAmp, THEME.glowAmp);
-    gl.uniform1f(this.litU.u_glowRadius, THEME.glowRadius);
-    gl.uniform1f(this.litU.u_glowPower, THEME.glowPower);
-    gl.uniform1f(this.litU.u_directShare, THEME.directShare);
+    gl.uniform1f(this.litU.u_glowAmp, settings.glowAmp);
+    gl.uniform1f(this.litU.u_glowRadius, settings.glowRadius);
+    gl.uniform1f(this.litU.u_glowPower, settings.glowPower);
+    gl.uniform1f(this.litU.u_directShare, settings.directShare);
     gl.bindVertexArray(this.fanVao);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.fanBuf);
     gl.bufferData(gl.ARRAY_BUFFER, this.fan.subarray(0, this.fanVerts * 2), gl.DYNAMIC_DRAW);
@@ -241,7 +241,7 @@ export class WebGL2Renderer implements Renderer {
 
     // ── 调试射线：光源 → 每一个可见多边形顶点（可以看到射线正好钉在角点上）
     if (o.debugRays) {
-      const w = 0.5 * model.pxScale;
+      const w = settings.rayWidth * model.pxScale;
       const poly = model.vis.poly;
       const n = model.vis.vertexCount;
       for (let i = 0; i < n; i++) {
@@ -251,13 +251,13 @@ export class WebGL2Renderer implements Renderer {
 
     // ── 方块本体 + 被照亮的棱边
     if (o.showBlocks) {
-      const [fr, fg, fb] = THEME.blockFill;
+      const [fr, fg, fb] = blockFill();
       const count = model.instanceCount;
       for (let i = 0; i < count; i++) {
         const inst = model.instances[i];
         m.rect(inst.x, inst.y, inst.w, inst.h, fr, fg, fb, 1);
       }
-      const halfWidth = 0.85 * model.pxScale;
+      const halfWidth = settings.rimWidth * model.pxScale;
       for (let i = 0; i < count; i++) {
         const inst = model.instances[i];
         for (let e = 0; e < 4; e++) {
@@ -280,7 +280,7 @@ export class WebGL2Renderer implements Renderer {
             const my = (y0 + y1) * 0.5 - light.y;
             const dist = Math.hypot(mx, my) || 1;
             const ndotl = Math.max(0, (-mx * seg.nx - my * seg.ny) / dist);
-            const k = THEME.rimStrength * (0.3 + 0.7 * ndotl);
+            const k = settings.rimStrength * (0.3 + 0.7 * ndotl);
             m.thickLine(x0, y0, x1, y1, halfWidth, fr + (1 - fr) * k, fg + (1 - fg) * k, fb + (1 - fb) * k, 1);
           }
         }
@@ -289,11 +289,7 @@ export class WebGL2Renderer implements Renderer {
     this.alphaVerts = m.vertexCount;
 
     // ── 灯泡：实心白点 + 柔和外晕（叠加混合）
-    m.disc(
-      light.x,
-      light.y,
-      THEME.lightStops.map(([r, a]) => [r, 1, 1, 1, a]),
-    );
+    m.disc(light.x, light.y, bulbStops());
     this.addVerts = m.vertexCount - this.alphaVerts;
     if (model.opts.debugRays) {
       // 射线端点上再点一个小亮点，强调「钉在角点」
@@ -302,7 +298,7 @@ export class WebGL2Renderer implements Renderer {
       for (let i = 0; i < n; i++) {
         m.disc(poly[i * 2], poly[i * 2 + 1], [
           [0, 1, 0.9, 0.6, 0.95],
-          [2.2 * model.pxScale, 1, 0.9, 0.6, 0],
+          [settings.dotRadius * model.pxScale, 1, 0.9, 0.6, 0],
         ], 12);
       }
       this.addVerts = m.vertexCount - this.alphaVerts;

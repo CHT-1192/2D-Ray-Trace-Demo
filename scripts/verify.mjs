@@ -205,6 +205,17 @@ const check = (name, ok, detail = '') => {
 };
 const section = (t) => console.log(`\n\u001b[1m${t}\u001b[0m`);
 
+/** 整图平均灰度（判断整体明暗变化用） */
+function meanGray(img) {
+  let sum = 0;
+  const n = img.w * img.h;
+  for (let i = 0; i < n; i++) {
+    const d = i * 4;
+    sum += 0.299 * img.data[d] + 0.587 * img.data[d + 1] + 0.114 * img.data[d + 2];
+  }
+  return sum / n;
+}
+
 function meanAbsDiff(a, b) {
   const n = Math.min(a.data.length, b.data.length);
   let sum = 0;
@@ -366,7 +377,7 @@ check('没有原样复刻参考图里的方块', clones.length === 0, `${clones.
 section('3. 像素级配色与硬阴影');
 section('3. 像素级配色与硬阴影');
 const img = first.img;
-const glow = await page.evaluate(() => ({ ...window.__RT2D__.theme }));
+const glow = await page.evaluate(() => ({ ...window.__RT2D__.settings }));
 
 const biggest = [...rects].sort((a, b) => b.w * b.h - a.w * a.h)[0];
 const fillSample = gray(img, Math.round(biggest.x + biggest.w / 2), Math.round(biggest.y + biggest.h / 2));
@@ -819,6 +830,75 @@ check(
   Number.isFinite(uniformMs) && uniformMs > exactMs * 1.5,
   `exact ${(exactMs * 1000).toFixed(1)}µs（${exactT.rays} 条射线） vs uniform ${(uniformMs * 1000).toFixed(1)}µs（${uniformT.rays} 条）`,
 );
+
+section('10. 高级参数面板（实时调参）');
+await page.evaluate(() => {
+  const api = window.__RT2D__;
+  api.opts.paused = true;
+  api.opts.mode = 'exact';
+  api.settings.glowRadius = 1050; // 从默认值开始
+});
+await waitFrames(3);
+
+check('面板默认是收起的', await page.evaluate(() => document.getElementById('advanced').hidden));
+await page.keyboard.press('KeyA');
+await waitFrames(3);
+check('按 A 能打开高级面板', await page.evaluate(() => !document.getElementById('advanced').hidden));
+
+// 基准图要在面板打开之后截，两张图的面板状态才一致
+const before = await shoot('19-adv-before');
+
+const knobCount = await page.evaluate(() => document.querySelectorAll('#advanced [data-knob]').length);
+check('面板里列出的实时参数数量', knobCount >= 20, `${knobCount} 个滑块`);
+
+// 拖「光照范围」到最大：角落应该立刻变亮
+await page.evaluate(() => {
+  const el = document.querySelector('#advanced [data-knob="glowRadius"]');
+  el.value = el.max;
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+});
+await waitFrames(3);
+const brighter = await shoot('20-adv-glow-max');
+const cornerBefore = gray(before.img, 12, 12);
+const cornerAfter = gray(brighter.img, 12, 12);
+check(
+  '拖动「光照范围」立即生效（角落变亮）',
+  cornerAfter - cornerBefore >= 8,
+  `角落 ${cornerBefore} → ${cornerAfter}（设置值 ${await page.evaluate(() => window.__RT2D__.settings.glowRadius)}）`,
+);
+
+// 拖「阴影深度」：directShare 是「辉光里会被遮挡的比例」，
+// 亮区总亮度与它无关，只有阴影区会变暗 —— 所以看整图平均灰度。
+const meanLit = meanGray(brighter.img);
+await page.evaluate(() => {
+  const el = document.querySelector('#advanced [data-knob="directShare"]');
+  el.value = el.max;
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+});
+await waitFrames(3);
+const darker = await shoot('21-adv-shadow-max');
+const meanShadow = meanGray(darker.img);
+check(
+  '拖动「阴影深度」立即生效（阴影区变暗、整图均值下降）',
+  meanLit - meanShadow >= 1.5,
+  `整图均值 ${meanLit.toFixed(2)} → ${meanShadow.toFixed(2)}`,
+);
+
+// 恢复默认（点完把鼠标挪开，否则按钮的 hover 高亮会留在截图里）
+await page.locator('#advanced .reset').click();
+await page.mouse.move(600, 640);
+await waitFrames(3);
+check(
+  '「恢复默认值」把参数改回去',
+  await page.evaluate(() => window.__RT2D__.settings.glowRadius === 1050 && window.__RT2D__.settings.directShare === 0.62),
+  `glowRadius=${await page.evaluate(() => window.__RT2D__.settings.glowRadius)}`,
+);
+const restored = await shoot('22-adv-restored');
+check('恢复后画面与改动前一致', meanAbsDiff(restored.img, before.img).changedRatio === 0, `差异像素 ${(meanAbsDiff(restored.img, before.img).changedRatio * 100).toFixed(3)}%`);
+
+await page.keyboard.press('KeyA');
+await waitFrames(2);
+check('再按 A 收起面板', await page.evaluate(() => document.getElementById('advanced').hidden));
 
 await browser.close();
 ownServer?.kill();

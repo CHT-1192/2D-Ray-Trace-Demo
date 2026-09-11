@@ -1,4 +1,5 @@
-import { THEME, WORLD_H } from '../config';
+import { WORLD_H } from '../config';
+import { blockFill, bulbStops, settings } from '../settings';
 import { falloffStops } from './mesh';
 import type { RenderModel, Renderer } from './types';
 
@@ -43,9 +44,9 @@ export class Canvas2DRenderer implements Renderer {
     const { light, worldW, worldH } = model;
 
     // ── 背景：环境光 + 那层「没有光线追踪」的辉光
-    const bg = ctx.createRadialGradient(light.x, light.y, 0, light.x, light.y, THEME.glowRadius);
-    for (const [t, v] of falloffStops(THEME.glowRadius, THEME.glowPower, 1 - THEME.directShare)) {
-      bg.addColorStop(t, gray(THEME.bgFar + v));
+    const bg = ctx.createRadialGradient(light.x, light.y, 0, light.x, light.y, settings.glowRadius);
+    for (const [t, v] of falloffStops(settings.glowRadius, settings.glowPower, 1 - settings.directShare)) {
+      bg.addColorStop(t, gray(settings.bgFar + v));
     }
     ctx.globalCompositeOperation = 'source-over';
     ctx.fillStyle = bg;
@@ -61,8 +62,8 @@ export class Canvas2DRenderer implements Renderer {
       ctx.closePath();
       ctx.clip();
       ctx.globalCompositeOperation = 'lighter';
-      const lit = ctx.createRadialGradient(light.x, light.y, 0, light.x, light.y, THEME.glowRadius);
-      for (const [t, v] of falloffStops(THEME.glowRadius, THEME.glowPower, THEME.directShare)) {
+      const lit = ctx.createRadialGradient(light.x, light.y, 0, light.x, light.y, settings.glowRadius);
+      for (const [t, v] of falloffStops(settings.glowRadius, settings.glowPower, settings.directShare)) {
         lit.addColorStop(t, gray(v));
       }
       ctx.fillStyle = lit;
@@ -74,7 +75,7 @@ export class Canvas2DRenderer implements Renderer {
     if (model.opts.debugRays) {
       ctx.globalCompositeOperation = 'lighter';
       ctx.strokeStyle = 'rgba(255,222,153,0.22)';
-      ctx.lineWidth = 1 * model.pxScale;
+      ctx.lineWidth = settings.rayWidth * model.pxScale;
       ctx.beginPath();
       for (let i = 0; i < n; i++) {
         ctx.moveTo(light.x, light.y);
@@ -86,7 +87,7 @@ export class Canvas2DRenderer implements Renderer {
     // ── 方块 + 被照亮的棱边
     if (model.opts.showBlocks) {
       ctx.globalCompositeOperation = 'source-over';
-      const fr = THEME.blockFill[0];
+      const fr = blockFill()[0];
       ctx.fillStyle = gray(fr);
       const count = model.instanceCount;
       for (let i = 0; i < count; i++) {
@@ -95,7 +96,7 @@ export class Canvas2DRenderer implements Renderer {
       }
 
       ctx.lineCap = 'butt';
-      ctx.lineWidth = 1.7 * model.pxScale;
+      ctx.lineWidth = settings.rimWidth * 2 * model.pxScale;
       for (let i = 0; i < count; i++) {
         const inst = model.instances[i];
         for (let e = 0; e < 4; e++) {
@@ -114,7 +115,7 @@ export class Canvas2DRenderer implements Renderer {
             const my = (y0 + y1) * 0.5 - light.y;
             const dist = Math.hypot(mx, my) || 1;
             const ndotl = Math.max(0, (-mx * seg.nx - my * seg.ny) / dist);
-            const k = THEME.rimStrength * (0.3 + 0.7 * ndotl);
+            const k = settings.rimStrength * (0.3 + 0.7 * ndotl);
             ctx.strokeStyle = gray(fr + (1 - fr) * k);
             ctx.beginPath();
             ctx.moveTo(x0, y0);
@@ -127,9 +128,10 @@ export class Canvas2DRenderer implements Renderer {
 
     // ── 灯泡
     ctx.globalCompositeOperation = 'lighter';
-    const halo = THEME.lightStops[THEME.lightStops.length - 1][0];
+    const stops = bulbStops();
+    const halo = stops[stops.length - 1][0] || 1;
     const glow = ctx.createRadialGradient(light.x, light.y, 0, light.x, light.y, halo);
-    for (const [r, a] of THEME.lightStops) glow.addColorStop(Math.min(1, r / halo), `rgba(255,255,255,${a})`);
+    for (const [r, , , , a] of stops) glow.addColorStop(Math.min(1, r / halo), `rgba(255,255,255,${a})`);
     ctx.fillStyle = glow;
     ctx.beginPath();
     ctx.arc(light.x, light.y, halo, 0, Math.PI * 2);

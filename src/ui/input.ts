@@ -8,12 +8,25 @@ export interface InputHandlers {
 
 /** 键盘 + 指针输入；返回解绑函数。 */
 export function attachInput(target: HTMLElement, handlers: InputHandlers): () => void {
+  // 控件自己会消费的按键（滑块用方向键、复选框用空格），其余快捷键照常生效，
+  // 否则拖完滑块之后键盘就「失灵」了。
+  const ARROW_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown']);
+
   const onKeyDown = (e: KeyboardEvent): void => {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
-    // 正在输入框 / 下拉框 / 复选框上操作时，别抢它的按键
     const el = e.target as HTMLElement | null;
     const tag = el?.tagName;
-    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+    const type = (el as HTMLInputElement | null)?.type;
+    if (tag === 'TEXTAREA' || tag === 'SELECT') return;
+    if (tag === 'INPUT') {
+      if (type === 'range' && !ARROW_KEYS.has(e.code)) {
+        /* 滑块只吃掉方向键，其余交给全局快捷键 */
+      } else if (type === 'checkbox' && e.code !== 'Space') {
+        /* 复选框只吃掉空格 */
+      } else {
+        return;
+      }
+    }
     if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
     handlers.onKey(e.code);
   };

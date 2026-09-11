@@ -1,5 +1,6 @@
-import { DEFAULT_SEED, REF_H, REF_W, THEME, WORLD_H } from '../config';
-import { BANDS, makeRng, rectsOverlap, sampleSize } from './layout';
+import { DEFAULT_SEED, REF_H, REF_W, WORLD_H } from '../config';
+import { settings, sampleSize } from '../settings';
+import { BANDS, makeRng, rectsOverlap } from './layout';
 import { mixSeed } from './math';
 import { makeSegment, pointInRect, setSegment, type Segment } from './segment';
 
@@ -35,9 +36,6 @@ function makeInstance(): BlockInstance {
 const SPAWN_MARGIN = 280;
 /** 在右边多远之外回收（同样保证消失时看不见）。 */
 const CULL_MARGIN = 120;
-/** 带内两个方块之间的最小间隙（参考单位）。 */
-const MIN_GAP = 10;
-
 /**
  * 场景：一条不断向远处延伸的滚动条带。
  *
@@ -105,8 +103,8 @@ export class Scene {
   resize(w: number, h: number): void {
     this.worldW = w;
     this.worldH = h;
-    this.light.x = w * 0.5;
-    this.light.y = h * (325 / 685);
+    this.light.x = w * settings.lightX;
+    this.light.y = h * settings.lightY;
   }
 
   /** 推进相机并维护方块条带。 */
@@ -142,7 +140,8 @@ export class Scene {
         this.spawned++;
         // 横向步进：有时故意小于自身宽度，允许同带内 x 方向部分重叠（靠 y 错开），
         // 这样疏密更接近参考图，而不是整齐排队。
-        cursor -= size.w * (0.45 + 0.55 * rng()) + MIN_GAP + rng() * 100;
+        const t = Math.min(0.95, Math.max(0, settings.overlap));
+        cursor -= size.w * (t + (1 - t) * rng()) + settings.gap + rng() * settings.stepSpread;
       }
       this.cursors[i] = cursor;
     }
@@ -171,7 +170,7 @@ export class Scene {
 
   private collides(candidate: { x: number; y: number; w: number; h: number }): boolean {
     for (let i = 0; i < this.blocks.length; i++) {
-      if (rectsOverlap(candidate, this.blocks[i], MIN_GAP)) return true;
+      if (rectsOverlap(candidate, this.blocks[i], settings.gap)) return true;
     }
     return false;
   }
@@ -257,7 +256,7 @@ export class Scene {
 
   /** 视口外的「外墙」：给逃逸的射线一个兜底，保证可见多边形永远闭合。 */
   private emitWalls(): void {
-    const m = THEME.wallMargin;
+    const m = settings.wallMargin;
     const w = this.worldW;
     const h = this.worldH;
     this.emitSegment(-m, -m, w + m, -m, 0, -1, -1, -1);
