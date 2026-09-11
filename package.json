@@ -1,0 +1,25 @@
+{
+  "name": "2d-ray-trace-demo",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "2D 光线追踪 Demo —— 角点角度精确锁定的可见性多边形 + WebGL2 硬阴影，方块自左向右平移",
+  "scripts": {
+    "start": "node server/server.mjs",
+    "dev": "node server/server.mjs --watch --open",
+    "build": "node scripts/build.mjs",
+    "build:standalone": "node scripts/build.mjs --standalone-only",
+    "watch": "node scripts/build.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "node scripts/test.mjs",
+    "verify": "node scripts/verify.mjs",
+    "clean": "node -e \"fs.rmSync('dist',{recursive:true,force:true})\""
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

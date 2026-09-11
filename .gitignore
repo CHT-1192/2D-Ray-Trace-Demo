@@ -1,0 +1,8 @@
+node_modules/
+
+# 构建产物：站点版不入库；单文件版是交付物，跟着源码一起提交
+dist/*
+!dist/standalone.html
+
+.DS_Store
+*.log
