@@ -1,4 +1,4 @@
-import { DEFAULT_OPTIONS, DEFAULT_SEED, WORLD_H, type Options } from './config';
+import { DEFAULT_OPTIONS, DEFAULT_SEED, THEME, WORLD_H, type Options } from './config';
 import { Scene } from './core/scene';
 import { Visibility, VisibilityEngine } from './core/visibility';
 import { createRenderer } from './render';
@@ -238,6 +238,7 @@ function boot(): void {
     stats,
     relayout,
     solveMeter,
+    theme: THEME,
     applySeed,
     getSeed: () => scene.seed,
   };

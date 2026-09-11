@@ -366,6 +366,8 @@ check('没有原样复刻参考图里的方块', clones.length === 0, `${clones.
 section('3. 像素级配色与硬阴影');
 section('3. 像素级配色与硬阴影');
 const img = first.img;
+const glow = await page.evaluate(() => ({ ...window.__RT2D__.theme }));
+
 const biggest = [...rects].sort((a, b) => b.w * b.h - a.w * a.h)[0];
 const fillSample = gray(img, Math.round(biggest.x + biggest.w / 2), Math.round(biggest.y + biggest.h / 2));
 check(
@@ -373,11 +375,24 @@ check(
   Math.abs(fillSample - 61) <= 3,
   `最大方块 (${biggest.x},${biggest.y} ${biggest.w}x${biggest.h}) 内部实测 ${fillSample}`,
 );
-check('左上角远处背景 ≈ 81 (0.318)', Math.abs(gray(img, 12, 12) - 81) <= 8, `实测 ${gray(img, 12, 12)}`);
+// 远处角落（大概率在阴影里）应该等于「环境光」那一层：
+//   bgFar + glowAmp·(1-directShare)·f(d)   —— 万一它是亮的，则等于全亮值。
+// 参考图那套 R=700 时这里是 81；范围调大后自然更亮，所以对模型验而不是对旧值验。
+const cornerSample = gray(img, 12, 12);
+const dCorner = Math.hypot(12 - 600, 12 - 325);
+const fCorner = Math.pow(Math.max(0, 1 - dCorner / glow.glowRadius), glow.glowPower);
+const ambientAt = 255 * (glow.bgFar + glow.glowAmp * (1 - glow.directShare) * fCorner);
+const fullAt = 255 * (glow.bgFar + glow.glowAmp * fCorner);
+check(
+  '远处角落亮度符合环境光模型',
+  Math.min(Math.abs(cornerSample - ambientAt), Math.abs(cornerSample - fullAt)) <= 8,
+  `实测 ${cornerSample}，模型：阴影 ${ambientAt.toFixed(0)} / 全亮 ${fullAt.toFixed(0)}`,
+);
 check('灯泡是白的', gray(img, 600, 325) >= 250, `实测 ${gray(img, 600, 325)}`);
 
-// 参考图实测的亮度衰减曲线 v(d) = 0.315 + 0.300*(1-d/700)^1.16
-const refAt = (d) => 255 * (0.315 + 0.3 * Math.pow(1 - d / 700, 1.16));
+// 亮区衰减：对着「页面里当前配置的模型」验，而不是写死参考图那条曲线
+// （光照范围是可调项，参考图那套 R=700/p=1.16 只够铺到画面中部）
+const modelAt = (d) => 255 * (glow.bgFar + glow.glowAmp * Math.pow(Math.max(0, 1 - d / glow.glowRadius), glow.glowPower));
 let falloffWorst = 0;
 const falloffSamples = [
   [700, 325],
@@ -386,12 +401,21 @@ const falloffSamples = [
 ];
 for (const [x, y] of falloffSamples) {
   const d = Math.hypot(x - 600, y - 325);
-  falloffWorst = Math.max(falloffWorst, Math.abs(gray(img, x, y) - refAt(d)));
+  falloffWorst = Math.max(falloffWorst, Math.abs(gray(img, x, y) - modelAt(d)));
 }
 check(
-  '亮区衰减曲线与参考图一致（3 个半径，误差 ≤ 8/255）',
+  '亮区衰减与配置的模型一致（3 个半径，误差 ≤ 8/255）',
   falloffWorst <= 8,
-  `最大误差 ${falloffWorst.toFixed(1)}/255`,
+  `R=${glow.glowRadius} p=${glow.glowPower}，最大误差 ${falloffWorst.toFixed(1)}/255`,
+);
+
+// 范围：画面最远的角（≈690）也要被照亮，否则「亮光范围」就还是只到中部
+const cornerD = Math.hypot(600, 325);
+const cornerGlow = Math.pow(Math.max(0, 1 - cornerD / glow.glowRadius), glow.glowPower);
+check(
+  '亮光铺得到画面最远的角',
+  cornerGlow > 0.2,
+  `最远角 d≈${cornerD.toFixed(0)}，辉光仍有 ${(cornerGlow * 100).toFixed(0)}%（参考图那套只有 1.4%）`,
 );
 
 // 灯泡剖面逐点比对（这些数字是从参考截图 (600+r, 325) 上直接量出来的）
