@@ -859,12 +859,12 @@ await page.evaluate(() => {
 });
 await waitFrames(3);
 const brighter = await shoot('20-adv-glow-max');
-const cornerBefore = gray(before.img, 12, 12);
-const cornerAfter = gray(brighter.img, 12, 12);
+const meanBefore = meanGray(before.img);
+const meanAfter = meanGray(brighter.img);
 check(
-  '拖动「光照范围」立即生效（角落变亮）',
-  cornerAfter - cornerBefore >= 8,
-  `角落 ${cornerBefore} → ${cornerAfter}（设置值 ${await page.evaluate(() => window.__RT2D__.settings.glowRadius)}）`,
+  '拖动「光照范围」立即生效（整图变亮）',
+  meanAfter - meanBefore >= 3,
+  `整图均值 ${meanBefore.toFixed(2)} → ${meanAfter.toFixed(2)}（设置值 ${await page.evaluate(() => window.__RT2D__.settings.glowRadius)}）`,
 );
 
 // 拖「阴影深度」：directShare 是「辉光里会被遮挡的比例」，
@@ -899,6 +899,83 @@ check('恢复后画面与改动前一致', meanAbsDiff(restored.img, before.img)
 await page.keyboard.press('KeyA');
 await waitFrames(2);
 check('再按 A 收起面板', await page.evaluate(() => document.getElementById('advanced').hidden));
+
+section('11. 多重阴影：遮挡物越多越暗');
+await hideUi();
+await page.evaluate(() => {
+  const api = window.__RT2D__;
+  api.opts.paused = true;
+  api.opts.debugRays = false;
+  api.opts.showBlocks = true;
+  api.settings.glowRadius = 1050;
+  api.settings.directShare = 0.62;
+  api.applySeed(20260910);
+});
+await waitFrames(4);
+const multi = await shoot('23-multishadow');
+
+// 按模型逐点核对：n 个遮挡物 ⇒ bgFar + amp·f·dsⁿ
+const modelCheck = await page.evaluate(() => {
+  const api = window.__RT2D__;
+  const st = api.settings;
+  const { x: lx, y: ly } = api.scene.light;
+  const ds = 1 - st.directShare;
+  const byN = new Map(); // n -> {sample, expect, dist}
+  const counts = [0, 0, 0, 0, 0];
+  for (let y = 6; y < 679; y += 3) {
+    for (let x = 6; x < 1194; x += 3) {
+      const n = api.blockerCount(x, y);
+      if (n < 0 || n > 4) continue;
+      counts[n]++;
+      if (byN.has(n) || n > 2) continue;
+      // 只取 3×3 邻域层数一致的像素，避开阴影边界的抗锯齿
+      let clean = true;
+      for (let dy = -2; dy <= 2 && clean; dy += 2)
+        for (let dx = -2; dx <= 2; dx += 2) if (api.blockerCount(x + dx, y + dy) !== n) clean = false;
+      if (!clean) continue;
+      const d = Math.hypot(x - lx, y - ly);
+      const f = Math.pow(Math.max(0, 1 - d / st.glowRadius), st.glowPower);
+      byN.set(n, { x, y, n, expect: 255 * (st.bgFar + st.glowAmp * f * Math.pow(ds, n)), d });
+    }
+  }
+  return { samples: [...byN.values()], counts, ds };
+});
+
+const deep = modelCheck.counts.slice(2).reduce((a, b) => a + b, 0);
+const scanned = modelCheck.counts.reduce((a, b) => a + b, 0);
+check(
+  '画面里确实存在被 ≥2 个方块挡住的区域',
+  deep > scanned * 0.1,
+  `采样点分布 n=0:${modelCheck.counts[0]} n=1:${modelCheck.counts[1]} n=2:${modelCheck.counts[2]} n≥3:${modelCheck.counts[3] + modelCheck.counts[4]}（多遮挡占 ${((deep / scanned) * 100).toFixed(1)}%）`,
+);
+
+let worst = 0;
+const detail = [];
+for (const smp of modelCheck.samples) {
+  const got = gray(multi.img, smp.x, smp.y);
+  const err = Math.abs(got - smp.expect);
+  worst = Math.max(worst, err);
+  detail.push(`n=${smp.n}: ${got}/${smp.expect.toFixed(0)}`);
+}
+check(
+  '亮度符合「每多一个遮挡物再乘一次 ds」的模型',
+  modelCheck.samples.length >= 3 && worst <= 6,
+  `${detail.join('  ')}（ds=${modelCheck.ds.toFixed(2)}，最大误差 ${worst.toFixed(1)}/255）`,
+);
+
+// 关掉多重阴影（directShare=0 ⇒ ds=1）后，n≥2 的区域应该和 n=1 一样亮
+await page.evaluate(() => {
+  window.__RT2D__.settings.directShare = 0;
+});
+await waitFrames(3);
+const flat = await shoot('24-multishadow-off');
+const flatSamples = modelCheck.samples.map((smp) => gray(flat.img, smp.x, smp.y));
+const spread = Math.max(...flatSamples) - Math.min(...flatSamples);
+check(
+  '把「阴影深度」调到 0 时阴影不再累积（各点只剩距离衰减）',
+  spread < 40,
+  `各层采样点亮度 ${flatSamples.join('/')}，极差 ${spread}`,
+);
 
 await browser.close();
 ownServer?.kill();

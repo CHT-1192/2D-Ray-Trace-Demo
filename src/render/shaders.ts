@@ -94,3 +94,48 @@ void main() {
   outColor = v_color;
 }
 `;
+
+/**
+ * 多重阴影修正：把「被 n 个方块挡住」的区域再压暗。
+ *
+ * 底层渲染给出的是「1 个遮挡物」的亮度（环境光那份就是按 ds = 1-directShare 算的），
+ * 所以这里只需要补上「多出来的 n-1 个遮挡物」那部分：
+ *     目标 = bgFar + amp·f·dsⁿ ，当前 = bgFar + amp·f·ds
+ *     修正 = -(amp·ds·f·(1 - ds^(n-1)))         （n ≤ 1 时不修正）
+ * n 从离屏计数纹理读（每个本影 +1/16）。
+ *
+ * 注意不能直接输出负值：OpenGL ES 对定点（RGBA8）帧缓冲会**在混合前把源色钳到 [0,1]**，
+ * 负值会被吃掉。所以改成等价的乘法式衰减：
+ *     src = 需要减掉的量 / 当前值      dst ← dst·(1 - src)
+ * 当前值正好是背景层 bgFar + amp·ds·f（亮区被扇形盖住，不参与这一步），着色器自己就能算出来。
+ */
+export const SHADOW_FRAG = `#version 300 es
+precision highp float;
+in vec2 v_world;
+uniform vec2 u_world;
+uniform vec2 u_light;
+uniform sampler2D u_count;
+uniform float u_glowAmp;
+uniform float u_glowRadius;
+uniform float u_glowPower;
+uniform float u_directShare;
+uniform float u_bgFar;
+out vec4 outColor;
+
+void main() {
+  vec2 uv = vec2(v_world.x / u_world.x, 1.0 - v_world.y / u_world.y);
+  float n = floor(texture(u_count, uv).r * 16.0 + 0.5);
+  if (n < 2.0) {
+    outColor = vec4(0.0);
+    return;
+  }
+  float d = distance(v_world, u_light);
+  float f = pow(max(0.0, 1.0 - d / u_glowRadius), u_glowPower);
+  float ds = 1.0 - u_directShare;
+  float glow = u_glowAmp * ds * f;
+  float base = u_bgFar + glow;                       // 这一步时像素的当前值
+  float amount = glow * (1.0 - pow(ds, n - 1.0));    // 要减掉的量
+  float src = base > 1e-5 ? clamp(amount / base, 0.0, 1.0) : 0.0;
+  outColor = vec4(src, src, src, 0.0);
+}
+`;

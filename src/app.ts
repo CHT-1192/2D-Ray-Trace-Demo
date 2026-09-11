@@ -149,6 +149,9 @@ function boot(): void {
     const light = currentLight();
     meterLight.x = light.x;
     meterLight.y = light.y;
+    // scene.light 供遮挡计数等调试接口使用
+    scene.light.x = light.x;
+    scene.light.y = light.y;
     const blackout = scene.occludedAt(light.x, light.y);
 
     const t0 = performance.now();
@@ -267,6 +270,7 @@ function boot(): void {
     solveMeter,
     settings,
     theme: settings,
+    blockerCount: (x: number, y: number) => scene.blockerCount(x, y),
     applySeed,
     getSeed: () => scene.seed,
   };

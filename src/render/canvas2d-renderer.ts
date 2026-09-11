@@ -1,4 +1,5 @@
 import { WORLD_H } from '../config';
+import { umbraQuad } from '../core/shadow';
 import { blockFill, bulbStops, settings } from '../settings';
 import { falloffStops } from './mesh';
 import type { RenderModel, Renderer } from './types';
@@ -18,7 +19,11 @@ export class Canvas2DRenderer implements Renderer {
 
   private readonly canvas: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D;
+  /** 离屏「光场」：只有 amp·f，然后被每个方块的本影逐个 multiply 掉 */
+  private field = document.createElement('canvas');
+  private readonly umbra = [0, 0, 0, 0, 0, 0, 0, 0];
   private scale = 1;
+  private pixelScale = 1;
 
   constructor(canvas: HTMLCanvasElement) {
     const ctx = canvas.getContext('2d', { alpha: false });
@@ -36,44 +41,69 @@ export class Canvas2DRenderer implements Renderer {
     }
     // 世界坐标 → CSS 像素是等比缩放（世界高度恒为 WORLD_H）
     this.scale = cssH / WORLD_H;
-    this.ctx.setTransform(dpr * this.scale, 0, 0, dpr * this.scale, 0, 0);
+    this.pixelScale = dpr * this.scale;
+    this.ctx.setTransform(this.pixelScale, 0, 0, this.pixelScale, 0, 0);
+    if (this.field.width !== w || this.field.height !== h) {
+      this.field.width = w;
+      this.field.height = h;
+    }
   }
 
   render(model: RenderModel): void {
     const ctx = this.ctx;
     const { light, worldW, worldH } = model;
+    const ds = 1 - settings.directShare; // 一个遮挡物之后剩下的比例
 
-    // ── 背景：环境光 + 那层「没有光线追踪」的辉光
-    const bg = ctx.createRadialGradient(light.x, light.y, 0, light.x, light.y, settings.glowRadius);
-    for (const [t, v] of falloffStops(settings.glowRadius, settings.glowPower, 1 - settings.directShare)) {
-      bg.addColorStop(t, gray(settings.bgFar + v));
-    }
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.fillStyle = bg;
-    ctx.fillRect(0, 0, worldW, worldH);
+    // ── 离屏光场：先铺满 amp·f，再让每个方块的本影乘掉一次 ds
+    //    于是被 n 个方块挡住的像素拿到 amp·f·dsⁿ —— 多重阴影就是这么累积的。
+    const field = this.field;
+    const fctx = field.getContext('2d');
+    if (!fctx) return;
+    fctx.setTransform(1, 0, 0, 1, 0, 0);
+    fctx.globalCompositeOperation = 'source-over';
+    fctx.clearRect(0, 0, field.width, field.height);
+    fctx.setTransform(this.pixelScale, 0, 0, this.pixelScale, 0, 0);
 
-    // ── 直接光：把可见多边形裁出来，叠加一层径向衰减
-    const n = model.vis.vertexCount;
-    if (!model.blackout && n >= 3) {
-      ctx.save();
-      ctx.beginPath();
-      ctx.moveTo(model.vis.poly[0], model.vis.poly[1]);
-      for (let i = 1; i < n; i++) ctx.lineTo(model.vis.poly[i * 2], model.vis.poly[i * 2 + 1]);
-      ctx.closePath();
-      ctx.clip();
-      ctx.globalCompositeOperation = 'lighter';
-      const lit = ctx.createRadialGradient(light.x, light.y, 0, light.x, light.y, settings.glowRadius);
-      for (const [t, v] of falloffStops(settings.glowRadius, settings.glowPower, settings.directShare)) {
-        lit.addColorStop(t, gray(v));
+    if (model.blackout) {
+      // 灯泡被方块埋住：整屏都按「一层遮挡」处理，和 WebGL 版一致
+      fctx.fillStyle = gray(settings.glowAmp * ds);
+      fctx.fillRect(0, 0, worldW, worldH);
+    } else {
+      const glow = fctx.createRadialGradient(light.x, light.y, 0, light.x, light.y, settings.glowRadius);
+      for (const [t, v] of falloffStops(settings.glowRadius, settings.glowPower, 1)) {
+        glow.addColorStop(t, gray(v));
       }
-      ctx.fillStyle = lit;
-      ctx.fillRect(0, 0, worldW, worldH);
-      ctx.restore();
+      fctx.fillStyle = glow;
+      fctx.fillRect(0, 0, worldW, worldH);
+
+      fctx.globalCompositeOperation = 'multiply';
+      fctx.fillStyle = gray(ds);
+      for (let i = 0; i < model.instanceCount; i++) {
+        const inst = model.instances[i];
+        if (!umbraQuad(inst, model.segments, light.x, light.y, 4000, this.umbra)) continue;
+        const q = this.umbra;
+        fctx.beginPath();
+        fctx.moveTo(q[0], q[1]);
+        fctx.lineTo(q[2], q[3]);
+        fctx.lineTo(q[4], q[5]);
+        fctx.lineTo(q[6], q[7]);
+        fctx.closePath();
+        fctx.fill();
+      }
+      fctx.globalCompositeOperation = 'source-over';
     }
+
+    // ── 主画布：环境光地板 + 光场（叠加），等价于 WebGL 版的
+    //    背景 + 可见多边形扇形 + 多重阴影修正
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = gray(settings.bgFar);
+    ctx.fillRect(0, 0, worldW, worldH);
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.drawImage(field, 0, 0, worldW, worldH);
 
     // ── 调试射线
     if (model.opts.debugRays) {
-      ctx.globalCompositeOperation = 'lighter';
+      const n = model.vis.vertexCount;
       ctx.strokeStyle = 'rgba(255,222,153,0.22)';
       ctx.lineWidth = settings.rayWidth * model.pxScale;
       ctx.beginPath();

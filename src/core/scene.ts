@@ -217,6 +217,33 @@ export class Scene {
     return false;
   }
 
+  /**
+   * 调试 / 验证用：从光源到屏幕点 (x,y) 之间有几个方块挡着。
+   * 做法是沿这条射线数穿过的线段数再除以 2（穿过一个方块正好进、出各一次）。
+   */
+  blockerCount(x: number, y: number): number {
+    const lx = this.light.x;
+    const ly = this.light.y;
+    const dx = x - lx;
+    const dy = y - ly;
+    const len = Math.hypot(dx, dy) || 1;
+    let hits = 0;
+    for (let i = 0; i < this.segmentCount; i++) {
+      const s = this.segments[i];
+      if (s.owner < 0) continue; // 外墙不算遮挡物
+      const den = dx * s.ey - dy * s.ex;
+      if (den === 0) continue;
+      const wx = s.ax - lx;
+      const wy = s.ay - ly;
+      const t = (wx * s.ey - wy * s.ex) / den;
+      if (t <= 0 || t >= len) continue;
+      const u = (wx * dy - wy * dx) / den;
+      if (u < 0 || u > 1) continue;
+      hits++;
+    }
+    return Math.round(hits / 2);
+  }
+
   get visibleInstanceCount(): number {
     return this.instanceCount;
   }

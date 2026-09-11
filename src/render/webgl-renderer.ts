@@ -1,6 +1,7 @@
+import { umbraQuad } from '../core/shadow';
 import { blockFill, bulbStops, settings } from '../settings';
 import { MeshBuilder } from './mesh';
-import { BG_FRAG, FLAT_FRAG, FLAT_VERT, LIT_FRAG, POS_VERT } from './shaders';
+import { BG_FRAG, FLAT_FRAG, FLAT_VERT, LIT_FRAG, POS_VERT, SHADOW_FRAG } from './shaders';
 import type { RenderModel, Renderer } from './types';
 
 function compile(gl: WebGL2RenderingContext, type: number, src: string, label: string): WebGLShader {
@@ -69,11 +70,21 @@ export class WebGL2Renderer implements Renderer {
   private readonly flatVao: WebGLVertexArrayObject;
   private readonly flatBuf: WebGLBuffer;
 
+  private readonly shadowProg: WebGLProgram;
+  private readonly shadowU: Uniforms;
+  private countFbo: WebGLFramebuffer | null = null;
+  private countTex: WebGLTexture | null = null;
+
   private readonly mesh = new MeshBuilder(1 << 16);
   private fan = new Float32Array(1 << 13);
   private fanVerts = 0;
+  /** mesh 里本影四边形的顶点数（最前面这段） */
+  private umbraVerts = 0;
+  /** 叠加层在 mesh 里的起点与两段长度 */
+  private overlayStart = 0;
   private alphaVerts = 0;
   private addVerts = 0;
+  private readonly umbra = [0, 0, 0, 0, 0, 0, 0, 0];
 
   private pixelW = 1;
   private pixelH = 1;
@@ -98,10 +109,21 @@ export class WebGL2Renderer implements Renderer {
     this.bgProg = link(gl, POS_VERT, BG_FRAG, 'bg');
     this.litProg = link(gl, POS_VERT, LIT_FRAG, 'lit');
     this.flatProg = link(gl, FLAT_VERT, FLAT_FRAG, 'flat');
+    this.shadowProg = link(gl, POS_VERT, SHADOW_FRAG, 'shadow');
 
     this.bgU = uniformMap(gl, this.bgProg, ['u_world', 'u_light', 'u_bgFar', 'u_glowAmp', 'u_glowRadius', 'u_glowPower', 'u_ambShare']);
     this.litU = uniformMap(gl, this.litProg, ['u_world', 'u_light', 'u_glowAmp', 'u_glowRadius', 'u_glowPower', 'u_directShare']);
     this.flatU = uniformMap(gl, this.flatProg, ['u_world']);
+    this.shadowU = uniformMap(gl, this.shadowProg, [
+      'u_world',
+      'u_light',
+      'u_count',
+      'u_glowAmp',
+      'u_glowRadius',
+      'u_glowPower',
+      'u_directShare',
+      'u_bgFar',
+    ]);
 
     this.quadVao = gl.createVertexArray()!;
     this.quadBuf = gl.createBuffer()!;
@@ -139,6 +161,32 @@ export class WebGL2Renderer implements Renderer {
     const canvas = this.gl.canvas as HTMLCanvasElement;
     canvas.width = w;
     canvas.height = h;
+    this.resizeCountTarget(w, h);
+  }
+
+  /** 离屏「遮挡计数」纹理：每个方块的本影往里加 1/16，最多记到 16 个遮挡物。 */
+  private resizeCountTarget(w: number, h: number): void {
+    const gl = this.gl;
+    if (!this.countTex) this.countTex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, this.countTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+    if (!this.countFbo) this.countFbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.countFbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.countTex, 0);
+    const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    if (!ok) {
+      // 极端情况下（纹理分配失败）就退回「单一阴影」的老样子
+      gl.deleteFramebuffer(this.countFbo);
+      gl.deleteTexture(this.countTex);
+      this.countFbo = null;
+      this.countTex = null;
+    }
   }
 
   render(model: RenderModel): void {
@@ -147,9 +195,90 @@ export class WebGL2Renderer implements Renderer {
     gl.disable(gl.DEPTH_TEST);
     gl.disable(gl.CULL_FACE);
 
+    // 几何先全部组装好：mesh = [本影四边形…][叠加层 …]
+    this.mesh.reset();
+    this.buildUmbras(model);
+    this.umbraVerts = this.mesh.vertexCount;
+    this.overlayStart = this.umbraVerts;
+    this.buildOverlay(model);
+
+    // 先把本影画进离屏计数纹理，再画主画面，最后按计数把重叠阴影压暗
+    this.drawCountPass(model);
     this.drawBackground(model);
     this.drawLit(model);
+    this.drawShadowCorrection(model);
     this.drawOverlay(model);
+  }
+
+  /** 每个方块的本影四边形（近端两个剪影角点 + 向外延伸的远端）。 */
+  private buildUmbras(model: RenderModel): void {
+    if (!this.countTex || model.blackout) return;
+    const m = this.mesh;
+    // 每个本影给计数纹理加 1/16，16 个遮挡物封顶
+    const step = 1 / 16;
+    const far = 4000;
+    for (let i = 0; i < model.instanceCount; i++) {
+      const inst = model.instances[i];
+      if (!umbraQuad(inst, model.segments, model.light.x, model.light.y, far, this.umbra)) continue;
+      const q = this.umbra;
+      m.tri(q[0], q[1], q[2], q[3], q[4], q[5], step, 0, 0, 0);
+      m.tri(q[0], q[1], q[4], q[5], q[6], q[7], step, 0, 0, 0);
+    }
+  }
+
+  /** 把本影写进离屏纹理：叠加混合 ⇒ 每个像素记录的 R 就是遮挡物数量。 */
+  private drawCountPass(model: RenderModel): void {
+    const gl = this.gl;
+    if (!this.countFbo) return;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.countFbo);
+    gl.viewport(0, 0, this.pixelW, this.pixelH);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    if (this.umbraVerts > 0) {
+      this.uploadMesh();
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.ONE, gl.ONE);
+      gl.useProgram(this.flatProg);
+      gl.uniform2f(this.flatU.u_world, model.worldW, model.worldH);
+      gl.bindVertexArray(this.flatVao);
+      gl.drawArrays(gl.TRIANGLES, 0, this.umbraVerts);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, this.pixelW, this.pixelH);
+  }
+
+  /** 多重阴影：按「被几个方块挡住」把重叠区域压暗（n ≤ 1 时不动，保持原观感）。 */
+  private drawShadowCorrection(model: RenderModel): void {
+    const gl = this.gl;
+    if (!this.countTex || model.blackout) return;
+    // dst ← dst·(1 - src)：定点帧缓冲上唯一能"减"的办法（源色会被钳到 [0,1]）
+    gl.enable(gl.BLEND);
+    gl.blendFuncSeparate(gl.ZERO, gl.ONE_MINUS_SRC_COLOR, gl.ZERO, gl.ONE);
+    gl.useProgram(this.shadowProg);
+    gl.uniform2f(this.shadowU.u_world, model.worldW, model.worldH);
+    gl.uniform2f(this.shadowU.u_light, model.light.x, model.light.y);
+    gl.uniform1f(this.shadowU.u_glowAmp, settings.glowAmp);
+    gl.uniform1f(this.shadowU.u_glowRadius, settings.glowRadius);
+    gl.uniform1f(this.shadowU.u_glowPower, settings.glowPower);
+    gl.uniform1f(this.shadowU.u_directShare, settings.directShare);
+    gl.uniform1f(this.shadowU.u_bgFar, settings.bgFar);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.countTex);
+    gl.uniform1i(this.shadowU.u_count, 0);
+    gl.bindVertexArray(this.quadVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.quadBuf);
+    const w = model.worldW;
+    const h = model.worldH;
+    this.quadData.set([0, 0, w, 0, w, h, 0, 0, w, h, 0, h]);
+    gl.bufferData(gl.ARRAY_BUFFER, this.quadData, gl.DYNAMIC_DRAW);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+  }
+
+  private uploadMesh(): void {
+    const gl = this.gl;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.flatBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, this.mesh.view(), gl.DYNAMIC_DRAW);
   }
 
   private drawBackground(model: RenderModel): void {
@@ -213,23 +342,23 @@ export class WebGL2Renderer implements Renderer {
     this.buildOverlay(model);
     if (this.mesh.n === 0) return;
 
+    if (!this.countFbo) this.uploadMesh();
+
     gl.useProgram(this.flatProg);
     gl.uniform2f(this.flatU.u_world, model.worldW, model.worldH);
     gl.bindVertexArray(this.flatVao);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.flatBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, this.mesh.view(), gl.DYNAMIC_DRAW);
 
     // 普通 alpha 部分：调试射线 / 方块 / 棱边高光
     if (this.alphaVerts > 0) {
       gl.enable(gl.BLEND);
       gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-      gl.drawArrays(gl.TRIANGLES, 0, this.alphaVerts);
+      gl.drawArrays(gl.TRIANGLES, this.overlayStart, this.alphaVerts);
     }
     // 叠加部分：灯泡与外晕（src * srcAlpha + dst，即带 alpha 的加色）
     if (this.addVerts > 0) {
       gl.enable(gl.BLEND);
       gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE, gl.ZERO, gl.ONE);
-      gl.drawArrays(gl.TRIANGLES, this.alphaVerts, this.addVerts);
+      gl.drawArrays(gl.TRIANGLES, this.overlayStart + this.alphaVerts, this.addVerts);
     }
   }
 
@@ -237,7 +366,7 @@ export class WebGL2Renderer implements Renderer {
     const m = this.mesh;
     const o = model.opts;
     const light = model.light;
-    m.reset();
+    const start = m.vertexCount;
 
     // ── 调试射线：光源 → 每一个可见多边形顶点（可以看到射线正好钉在角点上）
     if (o.debugRays) {
@@ -286,11 +415,11 @@ export class WebGL2Renderer implements Renderer {
         }
       }
     }
-    this.alphaVerts = m.vertexCount;
+    this.alphaVerts = m.vertexCount - start;
 
     // ── 灯泡：实心白点 + 柔和外晕（叠加混合）
     m.disc(light.x, light.y, bulbStops());
-    this.addVerts = m.vertexCount - this.alphaVerts;
+    this.addVerts = m.vertexCount - start - this.alphaVerts;
     if (model.opts.debugRays) {
       // 射线端点上再点一个小亮点，强调「钉在角点」
       const poly = model.vis.poly;
@@ -301,7 +430,7 @@ export class WebGL2Renderer implements Renderer {
           [settings.dotRadius * model.pxScale, 1, 0.9, 0.6, 0],
         ], 12);
       }
-      this.addVerts = m.vertexCount - this.alphaVerts;
+      this.addVerts = m.vertexCount - start - this.alphaVerts;
     }
   }
 
@@ -313,6 +442,9 @@ export class WebGL2Renderer implements Renderer {
     gl.deleteBuffer(this.quadBuf);
     gl.deleteBuffer(this.fanBuf);
     gl.deleteBuffer(this.flatBuf);
+    if (this.countFbo) gl.deleteFramebuffer(this.countFbo);
+    if (this.countTex) gl.deleteTexture(this.countTex);
+    gl.deleteProgram(this.shadowProg);
     gl.deleteVertexArray(this.quadVao);
     gl.deleteVertexArray(this.fanVao);
     gl.deleteVertexArray(this.flatVao);
