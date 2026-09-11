@@ -64,7 +64,17 @@ const LIVERELOAD = `
 
 function ensureBuilt() {
   if (fs.existsSync(path.join(dist, 'index.html'))) return;
-  console.log('[server] dist/ 不存在，先构建一次…');
+
+  // 刚 clone 下来时 dist/index.html 是没有的（只提交了单文件版），需要现构建一次。
+  // 但构建要用 esbuild，所以先确认依赖装了没有，免得抛一个看不懂的 MODULE_NOT_FOUND。
+  if (!fs.existsSync(path.join(root, 'node_modules', 'esbuild'))) {
+    console.error('\n  \u001b[31m还没装依赖\u001b[0m：dist/index.html 需要现构建，而 esbuild 不在 node_modules 里。');
+    console.error('  请先执行：\u001b[1mnpm install && npm run build\u001b[0m');
+    console.error('  \u001b[2m（只想看效果的话，直接用浏览器打开 dist/standalone.html 也行，它不需要构建）\u001b[0m\n');
+    process.exit(1);
+  }
+
+  console.log('[server] 首次运行，先构建一次…');
   const res = spawnSync(process.execPath, [path.join(root, 'scripts/build.mjs')], { stdio: 'inherit' });
   if (res.status !== 0) process.exit(res.status ?? 1);
 }
