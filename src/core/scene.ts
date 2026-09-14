@@ -1,4 +1,4 @@
-import { DEFAULT_SEED, REF_H, REF_W, WORLD_H } from '../config';
+import { REF_H, REF_W, WORLD_H } from '../config';
 import { settings, sampleSize } from '../settings';
 import { BANDS, makeRng, rectsOverlap } from './layout';
 import { mixSeed } from './math';
@@ -57,8 +57,8 @@ export class Scene {
   worldH = WORLD_H;
   /** 相机走过的距离（参考单位）；可见窗口在世界坐标里是 [-scrollX, -scrollX + REF_W] */
   scrollX = 0;
-  /** 当前世界种子 */
-  seed = DEFAULT_SEED;
+  /** 当前世界种子（0 表示还没生成过世界） */
+  seed = 0;
   /** 灯泡位置（屏幕坐标），固定在画面中心偏上 */
   light = { x: REF_W / 2, y: (REF_H * 325) / 685 };
   /** 灯泡被方块压住 → 整个房间全黑 */
@@ -73,20 +73,19 @@ export class Scene {
   /** 累计生成过的方块数 */
   spawned = 0;
 
-  /** 每条放置带一条独立随机流 */
-  private bandRng: Array<() => number> = [];
+  /** 每条放置带一条独立随机流（generate() 里按种子重建） */
+  private bandRng: Array<() => number> = BANDS.map((_, i) => makeRng(mixSeed(1, i)));
   /** 每条带下一次生成的位置（参考单位，代表下一个方块的右边界） */
-  private cursors: number[] = [];
+  private cursors: number[] = BANDS.map(() => REF_W);
   private nextId = 0;
   private instanceCount = 0;
-
-  constructor() {
-    this.generate(DEFAULT_SEED);
-  }
 
   /**
    * 用给定种子重建整个世界。同一个 seed 永远得到同一个世界，
    * 且与调用时机、帧率无关。
+   *
+   * 注意 Scene 不会自己挑种子：调用方必须显式给一颗
+   * （app 在首次加载时用 randomSeed()，并把结果写进地址栏以便复现）。
    */
   generate(seed: number): void {
     this.seed = seed | 0;

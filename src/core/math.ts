@@ -23,6 +23,15 @@ export function mixSeed(seed: number, salt: number): number {
   return h | 0;
 }
 
+/**
+ * 随机一颗种子。
+ * 世界本身是**种子决定论**的（同种子 ⇒ 同世界，且与帧率无关），
+ * 但「挑哪颗种子」必须是随机的 —— 否则每个访客看到的世界一模一样。
+ */
+export function randomSeed(): number {
+  return Math.floor(Math.random() * 0x7fffffff);
+}
+
 /** 可复现的伪随机数（xorshift32）：同一个种子永远给出同一串数。 */
 export function makeRng(seed: number): () => number {
   let s = seed | 0 || 0x9e3779b9;

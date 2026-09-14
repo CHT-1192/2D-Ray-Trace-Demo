@@ -1,4 +1,5 @@
-import { DEFAULT_OPTIONS, DEFAULT_SEED, WORLD_H, type Options } from './config';
+import { DEFAULT_OPTIONS, WORLD_H, type Options } from './config';
+import { randomSeed } from './core/math';
 import { Scene } from './core/scene';
 import { Visibility, VisibilityEngine } from './core/visibility';
 import { createRenderer } from './render';
@@ -39,11 +40,12 @@ function boot(): void {
   let dpr = 1;
   let lastDpr = 0;
 
-  /** 复现入口：URL 里带 #seed=… 就用它，否则用默认种子 */
-  const readSeedFromUrl = (): number => {
+  /** 复现入口：URL 里带 #seed=… 就用它；没有就随机一颗（下面会立刻写回地址栏） */
+  const readSeedFromUrl = (): number | null => {
     const m = /(?:^|[#&])seed=(-?\d+)/.exec(location.hash);
-    const v = m ? Number(m[1]) : NaN;
-    return Number.isFinite(v) ? Math.trunc(v) | 0 : DEFAULT_SEED;
+    if (!m) return null;
+    const v = Number(m[1]);
+    return Number.isFinite(v) ? Math.trunc(v) | 0 : null;
   };
   const writeSeedToUrl = (value: number): void => {
     try {
@@ -52,7 +54,7 @@ function boot(): void {
       /* file:// 下可能被拒绝，忽略即可 */
     }
   };
-  const randomSeed = (): number => Math.floor(Math.random() * 0x7fffffff);
+
 
   const hud = new Hud(uiRoot, opts, {
     onMode(mode) {
@@ -256,7 +258,7 @@ function boot(): void {
   });
 
   window.addEventListener('resize', relayout);
-  applySeed(readSeedFromUrl());
+  applySeed(readSeedFromUrl() ?? randomSeed());
   relayout();
   requestAnimationFrame(frame);
 

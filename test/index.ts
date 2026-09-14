@@ -4,7 +4,7 @@
  * 关键思路：用一个「独立实现」当裁判 —— 以极密的角步长直接扫一圈求出可见面积，
  * 再和可见多边形的面积对比。精确锁定边缘应该能贴到裁判值，均匀 360 条则会被甩开。
  */
-import { DEFAULT_OPTIONS, DEFAULT_SEED, REF_H, REF_W, type Options } from '../src/config';
+import { DEFAULT_OPTIONS, REF_H, REF_W, type Options } from '../src/config';
 import {
   BANDS,
   REFERENCE_BLOCKS,
@@ -20,12 +20,16 @@ import { makeRayHit, rayCast, type Segment } from '../src/core/segment';
 import { Visibility, VisibilityEngine } from '../src/core/visibility';
 import { check, near, section, summary } from './harness';
 
+/** 测试自己用固定种子，跟产品行为（首次加载随机）无关 */
+const TEST_SEED = 20260910;
+
 const engine = new VisibilityEngine();
 const vis = new Visibility();
 
 function makeScene(rects?: readonly Rect[], lx = 600, ly = 325): Scene {
   const scene = new Scene();
   scene.resize(REF_W, REF_H);
+  scene.generate(TEST_SEED);
   if (rects) {
     scene.blocks.length = 0;
     rects.forEach((r, i) => scene.blocks.push({ id: i, ...r }));
@@ -414,15 +418,16 @@ section('8. 可复现性：同种子 ⇒ 同世界，且与步长无关');
   // 8.5 默认种子可用
   const def = new Scene();
   def.resize(REF_W, REF_H);
-  check('默认种子生成的世界非空', def.blocks.length > 8, `${def.blocks.length} 个方块，seed=${def.seed}`);
-  check('seed 字段与传入值一致', def.seed === DEFAULT_SEED, `${def.seed}`);
+  def.generate(TEST_SEED);
+  check('生成的世界非空', def.blocks.length > 8, `${def.blocks.length} 个方块，seed=${def.seed}`);
+  check('seed 字段与传入值一致', def.seed === TEST_SEED, `${def.seed}`);
 }
 
 section('9. 参考图只用于拟合，不再复刻');
 {
   const scene = new Scene();
   scene.resize(REF_W, REF_H);
-  scene.generate(DEFAULT_SEED);
+  scene.generate(TEST_SEED);
   const refKeys = new Set(REFERENCE_BLOCKS.map((r) => `${r.x},${r.y},${r.w},${r.h}`));
   const same = scene.blocks.filter((b) => refKeys.has(`${b.x},${b.y},${b.w},${b.h}`));
   check('首帧里没有任何一个方块与参考图那 16 个重合', same.length === 0, `${same.length} 个重合`);

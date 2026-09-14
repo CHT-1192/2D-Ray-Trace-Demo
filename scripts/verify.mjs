@@ -1063,6 +1063,44 @@ await page.evaluate(() => {
   window.__RT2D__.opts.followMouse = false;
 });
 
+section('13. 种子：首次加载随机，且立刻可复现');
+const openFresh = async () => {
+  const pg = await context.newPage();
+  await pg.goto(new URL('/', URL_BASE).href, { waitUntil: 'load' });
+  await pg.waitForFunction(() => Boolean(window.__RT2D__), null, { timeout: 15000 });
+  const info = await pg.evaluate(() => ({
+    seed: window.__RT2D__.scene.seed,
+    hash: location.hash,
+    print: window.__RT2D__.scene.blocks.map((b) => `${b.id}:${b.x}:${b.y}:${b.w}:${b.h}`).sort().join('|'),
+    blocks: window.__RT2D__.scene.blocks.length,
+  }));
+  return { pg, info };
+};
+
+const freshA = await openFresh();
+const freshB = await openFresh();
+check('首次加载没有 #seed 时，种子是随机挑的', Number.isInteger(freshA.info.seed) && freshA.info.seed > 0, `seed=${freshA.info.seed}`);
+check('种子立刻写进地址栏（刷新/分享都能复现）', freshA.info.hash === `#seed=${freshA.info.seed}`, freshA.info.hash);
+check(
+  '两次全新打开拿到不同的世界',
+  freshA.info.seed !== freshB.info.seed && freshA.info.print !== freshB.info.print,
+  `seed ${freshA.info.seed} vs ${freshB.info.seed}，各 ${freshA.info.blocks} / ${freshB.info.blocks} 个方块`,
+);
+
+await freshA.pg.reload({ waitUntil: 'load' });
+await freshA.pg.waitForFunction(() => Boolean(window.__RT2D__), null, { timeout: 15000 });
+const afterReload = await freshA.pg.evaluate(() => ({
+  seed: window.__RT2D__.scene.seed,
+  print: window.__RT2D__.scene.blocks.map((b) => `${b.id}:${b.x}:${b.y}:${b.w}:${b.h}`).sort().join('|'),
+}));
+check(
+  '刷新后仍是同一个世界（种子留在地址栏）',
+  afterReload.seed === freshA.info.seed && afterReload.print === freshA.info.print,
+  `seed=${afterReload.seed}`,
+);
+await freshA.pg.close();
+await freshB.pg.close();
+
 await browser.close();
 ownServer?.kill();
 

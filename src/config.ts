@@ -83,9 +83,6 @@ export interface Options {
   showBlocks: boolean;
 }
 
-/** 世界生成的默认种子：同一个种子 + 同样的滚动距离 = 完全一样的世界。 */
-export const DEFAULT_SEED = 20260910;
-
 export const DEFAULT_OPTIONS: Options = {
   mode: 'exact',
   speed: 70,
