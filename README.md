@@ -26,7 +26,7 @@
 
 ```bash
 npm install
-npm start                 # http://127.0.0.1:5173
+npm start                 # http://127.0.0.1:6850
 ```
 
 - `npm start` —— 构建 + 起静态服务器（**零依赖** Node http 服务，`server/server.mjs`）

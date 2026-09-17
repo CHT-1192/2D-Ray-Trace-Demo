@@ -2,7 +2,7 @@
 /**
  * 零依赖静态服务器：把 dist/ 跑起来。
  *
- *   node server/server.mjs                  默认 http://127.0.0.1:5173
+ *   node server/server.mjs                  默认 http://127.0.0.1:6850
  *   node server/server.mjs --port 8080
  *   node server/server.mjs --watch          监视 src/public，改动自动重建 + 页面自动刷新
  *   node server/server.mjs --open           启动后打开浏览器
@@ -27,7 +27,7 @@ const valueOf = (flag, fallback) => {
 
 const watch = has('--watch');
 const open = has('--open');
-const startPort = Number(process.env.PORT || valueOf('--port', '5173'));
+const startPort = Number(process.env.PORT || valueOf('--port', '6850'));
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -127,23 +127,33 @@ const server = http.createServer((req, res) => {
 });
 
 function listen(port, attempt = 0) {
-  server.once('error', (err) => {
+  // 每次尝试都要把自己注册的监听摘干净：失败重试时如果留着上一次的
+  // 'listening' 回调，最后成功那一刻会把历次端口都打印一遍（误导人的横幅）。
+  const onError = (err) => {
+    server.removeListener('listening', onListening);
     if (err.code === 'EADDRINUSE' && attempt < 12) {
       listen(port + 1, attempt + 1);
       return;
     }
     console.error('[server]', err.message);
     process.exit(1);
-  });
-  server.listen(port, '127.0.0.1', () => {
+  };
+
+  const onListening = () => {
+    server.removeListener('error', onError);
     const url = `http://127.0.0.1:${port}/`;
     console.log(`\n  \u001b[1m2D 光线追踪 Demo\u001b[0m  \u001b[36m${url}\u001b[0m`);
     console.log(`  \u001b[2m单文件版: ${url}standalone.html\u001b[0m`);
     if (watch) console.log('  \u001b[2m监听模式：改动 src/ 会自动重建并刷新页面\u001b[0m');
+    if (attempt > 0) console.log(`  \u001b[2m（${startPort} 起的前 ${attempt} 个端口被占用，自动顺延到这里）\u001b[0m`);
     console.log('');
     if (open && process.platform === 'darwin') spawn('open', [url], { stdio: 'ignore' });
     if (open && process.platform !== 'darwin') spawn('xdg-open', [url], { stdio: 'ignore' });
-  });
+  };
+
+  server.once('error', onError);
+  server.once('listening', onListening);
+  server.listen(port, '127.0.0.1');
 }
 
 ensureBuilt();

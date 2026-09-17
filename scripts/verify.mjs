@@ -24,7 +24,7 @@ const argOf = (flag, fallback) => {
   const i = argv.indexOf(flag);
   return i >= 0 && argv[i + 1] ? argv[i + 1] : fallback;
 };
-const URL_BASE = argOf('--url', 'http://127.0.0.1:5173/');
+const URL_BASE = argOf('--url', 'http://127.0.0.1:6850/');
 const OUT = argOf('--out', '/tmp/rt-verify');
 
 // ── Playwright 解析（优先本地，其次全局安装） ────────────────────────────────
@@ -260,7 +260,7 @@ async function reachable(url) {
 
 let ownServer = null;
 if (!(await reachable(URL_BASE))) {
-  const port = new URL(URL_BASE).port || '5173';
+  const port = new URL(URL_BASE).port || '6850';
   console.log(`[verify] ${URL_BASE} 不可达，自动启动临时服务器（端口 ${port}）…`);
   ownServer = spawn(process.execPath, [path.join(root, 'server/server.mjs'), '--port', port], { stdio: 'ignore' });
   let up = false;
