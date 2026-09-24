@@ -54,6 +54,9 @@ jobs:
         run: |
           touch dist/.nojekyll          # 关掉 Jekyll，避免下划线开头的文件被吃掉
           cp dist/index.html dist/404.html
+        # 注：Pages 的 CDN 不对外提供点文件，所以访问 /.nojekyll 会得到 404 —— 这是正常现象，
+        # 文件在发布的制品里、也在生效（GitHub 自家 Pages 站点同样如此）。构建源是 GitHub Actions
+        # 时 Jekyll 本来就不会跑，保留它只是为了万一哪天切回分支部署。
 
       - uses: actions/configure-pages@v6
 

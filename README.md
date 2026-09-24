@@ -45,7 +45,7 @@ npm start                 # http://127.0.0.1:6850
 
 线上地址 <https://cht-1192.github.io/2D-Ray-Trace-Demo/>，**每次推送到 `main` 自动重新构建发布**：
 
-`.github/workflows/pages.yml` 只做三步 —— `npm ci` → `npm run build` → `npm run typecheck`，然后把 `dist/` 交给官方 Pages Actions 发布。没有为 CI 另写一套构建逻辑，本地 `npm run build` 与线上产物同源；`public/index.html` 里的资源都是相对路径，部署到子目录不需要任何 base 配置。发布前会补两个文件：`.nojekyll`（关掉 Jekyll 处理）与 `404.html`（地址敲错时兜底回 Demo）。
+`.github/workflows/pages.yml` 只做三步 —— `npm ci` → `npm run build` → `npm run typecheck`，然后把 `dist/` 交给官方 Pages Actions 发布。没有为 CI 另写一套构建逻辑，本地 `npm run build` 与线上产物同源；`public/index.html` 里的资源都是相对路径，部署到子目录不需要任何 base 配置。发布前会补两个文件：`.nojekyll`（关掉 Jekyll 处理；Pages 的 CDN 不提供点文件，所以直接访问 `/.nojekyll` 会 404，属正常）与 `404.html`（地址敲错时兜底回 Demo）。
 
 仓库的 Pages 构建源设成了 **GitHub Actions**（不是分支），所以 `gh-pages` 分支不存在也不需要；只要 Actions 是启用状态，推送即上线，进度在仓库的 Actions 标签页可见。
 
