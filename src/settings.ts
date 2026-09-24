@@ -11,6 +11,7 @@
  *   - 光源位置改完要重算光照，app 会顺带 relayout 一次。
  */
 import { THEME } from './config';
+import type { RimLight } from './config';
 import { ASPECT_FIT, HEIGHT_RANGE, SIZE_CLASSES } from './core/layout';
 
 export interface Settings {
@@ -27,6 +28,11 @@ export interface Settings {
   directShare: number;
   /** 方块迎光棱边的高光强度 */
   rimStrength: number;
+  /**
+   * 棱边高光的亮度来源（默认 `flat`：只看向朝向、远近一样亮）。
+   * 换成另外三档就会把「该处地板亮度」引进来，见 `render/rim.ts` 的对照表。
+   */
+  rimLight: RimLight;
 
   // ── 灯泡 ──────────────────────────────────────────────
   /** 灯泡剖面半径的整体缩放 */
@@ -81,6 +87,7 @@ export function defaultSettings(): Settings {
     bgFar: THEME.bgFar,
     directShare: THEME.directShare,
     rimStrength: THEME.rimStrength,
+    rimLight: 'flat',
 
     bulbSize: 1,
     bulbBright: 1,

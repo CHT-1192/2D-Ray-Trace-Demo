@@ -9,7 +9,7 @@ export interface AdvancedActions {
 }
 
 interface Knob {
-  key: keyof Settings;
+  key: NumericKey;
   label: string;
   min: number;
   max: number;
@@ -19,11 +19,38 @@ interface Knob {
   hint?: string;
 }
 
+/** 数值型参数（滑块管的那些）—— 把枚举型的 `rimLight` 排除在外。 */
+type NumericKey = Exclude<keyof Settings, 'rimLight'>;
+
+/** 枚举型参数（目前只有棱边高光的亮度来源），用下拉框而不是滑块。 */
+interface Choice {
+  key: 'rimLight';
+  label: string;
+  hint?: string;
+  options: ReadonlyArray<{ value: Settings['rimLight']; label: string }>;
+}
+
+/** 面板里能改的、非数值型的参数。 */
+const CHOICES: Choice[] = [
+  {
+    key: 'rimLight',
+    label: '棱边高光取光',
+    hint: '棱边亮在方块本体上，不可能等于该处地板亮度本身；这里选的是「把底色往白里推」的比例乘不乘衰减',
+    options: [
+      { value: 'flat', label: '固定亮度（默认）' },
+      { value: 'falloff', label: '按辉光衰减' },
+      { value: 'direct', label: '只取直接光' },
+      { value: 'local', label: '取该处完整亮度' },
+    ],
+  },
+];
+
 interface Group {
   title: string;
   note?: string;
   open?: boolean;
   knobs: Knob[];
+  choices?: Choice[];
 }
 
 /**
@@ -53,6 +80,12 @@ const GROUPS: Group[] = [
       },
       { key: 'rimStrength', label: '棱边高光', min: 0, max: 1, step: 0.02, digits: 2 },
     ],
+  },
+  {
+    title: '棱边高光',
+    note: '「固定亮度」= 原先的行为：只看朝向，远近一样亮',
+    knobs: [],
+    choices: CHOICES,
   },
   {
     title: '灯泡与位置',
@@ -103,7 +136,8 @@ const GROUPS: Group[] = [
 
 /** 高级参数面板：把所有「改完立刻生效」的参数都收在这里。 */
 export class AdvancedPanel {
-  private readonly inputs = new Map<keyof Settings, { input: HTMLInputElement; value: HTMLElement }>();
+  private readonly inputs = new Map<NumericKey, { input: HTMLInputElement; value: HTMLElement }>();
+  private readonly selects = new Map<'rimLight', HTMLSelectElement>();
   private hidden = true;
 
   constructor(
@@ -177,6 +211,33 @@ export class AdvancedPanel {
         this.inputs.set(knob.key, { input, value });
       }
 
+      for (const choice of group.choices ?? []) {
+        const row = document.createElement('label');
+        row.className = 'knob knob-choice';
+        if (choice.hint) row.title = choice.hint;
+
+        const name = document.createElement('span');
+        name.textContent = choice.label;
+
+        const select = document.createElement('select');
+        select.dataset.knob = choice.key;
+        for (const opt of choice.options) {
+          const el = document.createElement('option');
+          el.value = opt.value;
+          el.textContent = opt.label;
+          select.append(el);
+        }
+        select.value = settings[choice.key];
+        select.addEventListener('change', () => {
+          settings[choice.key] = select.value as Settings['rimLight'];
+          this.actions.onChange(choice.key);
+        });
+
+        row.append(name, select);
+        details.append(row);
+        this.selects.set(choice.key, select);
+      }
+
       groups.append(details);
     }
 
@@ -211,9 +272,12 @@ export class AdvancedPanel {
       input.value = String(v);
       value.textContent = v.toFixed(this.digitsOf(key));
     }
+    for (const [key, select] of this.selects) {
+      select.value = settings[key];
+    }
   }
 
-  private digitsOf(key: keyof Settings): number {
+  private digitsOf(key: NumericKey): number {
     for (const g of GROUPS) for (const k of g.knobs) if (k.key === key) return k.digits;
     return 2;
   }

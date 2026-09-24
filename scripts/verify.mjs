@@ -1101,6 +1101,253 @@ check(
 await freshA.pg.close();
 await freshB.pg.close();
 
+section('14. 棱边高光：四种取光模式，像素与模型逐点对齐');
+await hideUi();
+await page.evaluate(() => {
+  const api = window.__RT2D__;
+  api.opts.paused = true;
+  api.opts.followMouse = false;
+  api.opts.showBlocks = true;
+  api.opts.debugRays = false;
+  api.applySeed(20260910);
+  // 把光源挪到角落 ⇒ 画面里自然出现距离差很大的迎光棱
+  api.settings.lightX = 0.5;
+  api.settings.lightY = 325 / 685;
+  api.settings.rimLight = 'flat';
+  api.settings.rimStrength = 0.46;
+  api.relayout();
+});
+await waitFrames(4);
+
+const rimUi = await page.evaluate(() => {
+  const el = document.querySelector('#advanced [data-knob="rimLight"]');
+  return el ? { tag: el.tagName, value: el.value, options: [...el.options].map((o) => o.value) } : null;
+});
+check(
+  '高级面板里有「棱边高光取光」下拉框，默认固定亮度',
+  rimUi?.tag === 'SELECT' && rimUi.value === 'flat' && rimUi.options.join(',') === 'flat,falloff,direct,local',
+  rimUi ? `<${rimUi.tag.toLowerCase()}> 默认=${rimUi.value}，选项 ${rimUi.options.join(' / ')}` : '没找到',
+);
+
+// 逐档核对：读回「渲染器这一帧真正要画的那段棱边」，再到画面上读同一个像素。
+//
+// 这一段写得比看上去需要的啰嗦，因为棱边是画面里最难测的东西，四个坑都踩过：
+//   1. 棱边亮度 = 朝向因子 × 衰减因子。只按距离分组，会把「朝向差异」当成「取光差异」——
+//      所以只挑「朝向因子几乎相同、距离差 3 倍以上」的一近一远作对照。
+//   2. litSpan 只说明「这条棱从光源看得见」，不等于迎着光（背面棱同样可见）；
+//      而合法线要按**参数 u** 判覆盖（竖棱的 x 是常量，拿坐标比会张冠李戴）。
+//      所以先用「亮段中点必落在某条线段的某个 litSpan 内 + 中点到该线段的垂距为 0」定出唯一来源。
+//   3. 棱是用「以棱为中心、宽 2×rimWidth」的四边形画的，只有 1~2 个物理像素宽且带抗锯齿：
+//      正好压在像素网格上时，中点那个像素是「棱 + 方块外地面」的混合值（近光源处实测偏低 23/255），
+//      再往内 1px 又可能整格落到方块底色上。所以不在固定位置上取值，而是沿法线取 ±3px 的窗口，
+//      要求窗口里**恰好有一个**像素等于模型值 —— 既不挑读数，也不放过错值。
+//   4. 亮段只有几十像素长时，一个窗口里可能有别的图形混进来，所以样本还要求够长、够靠画面内部。
+const rimCheck = await page.evaluate(async () => {
+  const api = window.__RT2D__;
+  const st = api.settings;
+  const canvas = document.getElementById('stage');
+  const gl = canvas.getContext('webgl2');
+  const scale = canvas.height / 685;
+  const { x: lx, y: ly } = api.scene.light;
+  const readAt = (wx, wy) =>
+    new Promise((res) => {
+      requestAnimationFrame(() => {
+        const px = new Uint8Array(4);
+        gl.readPixels(Math.round(wx * scale), Math.round((685 - wy) * scale), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+        res(px[0]);
+      });
+    });
+
+  /** 亮段的唯一来源线段（法线由它给出） */
+  const ownerOf = (s) => {
+    const mx = (s.x0 + s.x1) / 2;
+    const my = (s.y0 + s.y1) / 2;
+    const found = [];
+    for (let id = 0; id < api.scene.segmentCount; id++) {
+      const q = api.scene.segments[id];
+      if (q.id !== id) continue;
+      const spans = api.vis.litSpan(id);
+      if (!spans) continue;
+      const len2 = q.ex * q.ex + q.ey * q.ey;
+      if (len2 < 1e-12) continue;
+      const u = ((mx - q.ax) * q.ex + (my - q.ay) * q.ey) / len2;
+      if (u < -1e-9 || u > 1 + 1e-9) continue;
+      let inside = false;
+      for (let k = 0; k < spans.length; k += 2) {
+        if (u >= Math.min(spans[k], spans[k + 1]) - 1e-9 && u <= Math.max(spans[k], spans[k + 1]) + 1e-9) inside = true;
+      }
+      if (!inside) continue;
+      const perp = Math.abs((mx - q.ax) * q.ey - (my - q.ay) * q.ex) / Math.sqrt(len2);
+      if (perp > 1e-9) continue;
+      found.push(q);
+    }
+    return found.length === 1 ? found[0] : null;
+  };
+
+  const desc = (s) => {
+    const q = ownerOf(s);
+    if (!q) return null;
+    const mx = (s.x0 + s.x1) / 2;
+    const my = (s.y0 + s.y1) / 2;
+    const d = Math.hypot(mx - lx, my - ly) || 1;
+    const ndotl = Math.max(0, (-(mx - lx) * q.nx - (my - ly) * q.ny) / d);
+    const f = Math.pow(Math.max(0, 1 - d / st.glowRadius), st.glowPower);
+    const ds = 1 - st.directShare;
+    const factor = { flat: 1, falloff: f, direct: st.directShare * f, local: ds + st.directShare * f }[st.rimLight];
+    const rimK = st.rimStrength * (0.3 + 0.7 * ndotl);
+    const k = rimK * factor;
+    const expect = Math.round(255 * (st.blockTone + (1 - st.blockTone) * k));
+    return { mx, my, d, ndotl, factor, rimK, k, expect, nx: q.nx, ny: q.ny, len: Math.hypot(s.x1 - s.x0, s.y1 - s.y0), model: Math.round(s.r * 255) };
+  };
+
+  /** 沿法线取 ±3px 的窗口，返回读到的一串值 */
+  const profile = async (s) => {
+    const out = [];
+    for (let off = -3; off <= 3; off++) {
+      out.push({ off, v: await readAt(s.mx + s.nx * off, s.my + s.ny * off) });
+    }
+    return out;
+  };
+
+  const rows = [];
+  let pairInfo = null;
+  let closeUp = null; // 画面里最靠近光源的那一段：四种模式在这里应该几乎一样
+  for (const mode of ['flat', 'falloff', 'direct', 'local']) {
+    st.rimLight = mode;
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const usable = api
+      .rimSegments()
+      .map(desc)
+      .filter(Boolean)
+      .filter((s) => s.len >= 30 && s.mx > 40 && s.mx < 1160 && s.my > 40 && s.my < 645 && s.ndotl > 0.5);
+
+    if (!closeUp) {
+      const near = usable.filter((s) => s.d < 120).sort((a, b) => b.len - a.len)[0];
+      if (near) closeUp = { ...near, profile: await profile(near) };
+    }
+
+    let pair = null;
+    for (const a of usable.filter((s) => s.d < 200)) {
+      for (const b of usable.filter((s) => s.d > 3 * a.d)) {
+        const score = Math.abs(a.ndotl - b.ndotl);
+        if (score <= 0.03 && (!pair || score < pair.score)) pair = { a, b, score };
+      }
+    }
+    if (!pair) {
+      rows.push({ mode, near: null, far: null });
+      continue;
+    }
+    if (!pairInfo) pairInfo = { nearD: Math.round(pair.a.d), farD: Math.round(pair.b.d), diff: pair.score };
+    rows.push({
+      mode,
+      near: { ...pair.a, profile: await profile(pair.a) },
+      far: { ...pair.b, profile: await profile(pair.b) },
+    });
+  }
+  st.rimLight = 'flat';
+  return { rows, pairInfo, closeUp, tone: st.blockTone };
+});
+
+const byMode = Object.fromEntries(rimCheck.rows.map((r) => [r.mode, r]));
+check(
+  '找到了「朝向因子相同、距离差 3 倍以上」的一近一远两段棱边作对照',
+  Boolean(rimCheck.pairInfo) && rimCheck.rows.every((r) => r.near && r.far),
+  rimCheck.pairInfo
+    ? `d=${rimCheck.pairInfo.nearD} vs ${rimCheck.pairInfo.farD}，朝向因子相差 ${rimCheck.pairInfo.diff.toFixed(3)}`
+    : '没找到合适的对照段',
+);
+if (rimCheck.rows.every((r) => r.near && r.far)) {
+  const samples = rimCheck.rows.flatMap((r) => [r.near, r.far]);
+  // 每次采样两件事一起验：窗口里有没有、以及在不在该在的位置
+  const hitOf = (s) => s.profile.find((p) => Math.abs(p.v - s.expect) <= 2) ?? null;
+  const drawn = samples.filter((s) => s.expect - rimCheck.tone * 255 > 4); // 比底色亮这么多才算「画出来了」
+  const vanished = samples.filter((s) => s.expect - rimCheck.tone * 255 <= 4);
+
+  check(
+    '棱边像素 = 模型算出的颜色（亮度来源三种模式都是像素级吻合）',
+    drawn.length > 0 && drawn.every((s) => hitOf(s) !== null),
+    drawn.length
+      ? `命中 ${drawn.filter(hitOf).length}/${drawn.length}，例：flat 远 d=${Math.round(byMode.flat.far.d)} 期望 ${byMode.flat.far.expect} 实测 ${hitOf(byMode.flat.far)?.v}`
+      : '没有可判定的样本',
+  );
+  check(
+    '棱边就画在棱上（离散化后偏差 ≤ 3px）',
+    drawn.every((s) => Math.abs(hitOf(s).off) <= 3),
+    drawn.map((s) => `${Math.round(s.d)}px→偏移${hitOf(s).off}`).join('  '),
+  );
+  check(
+    '「只取直接光」档在远处把棱边压到几乎不可见（与模型一致）',
+    vanished.length > 0 && vanished.every((s) => s.expect - rimCheck.tone * 255 <= 4),
+    vanished.length
+      ? `k≈0 的样本 ${vanished.length} 个，期望值 ${vanished.map((s) => s.expect).join('/')}（方块底色 ${Math.round(rimCheck.tone * 255)}）`
+      : '没有出现 k≈0 的样本',
+  );
+  check(
+    '渲染器内部那份颜色与按几何复算的一致',
+    samples.every((s) => Math.abs(s.model - s.expect) <= 1),
+    `模型 ${samples.map((s) => s.model).join('/')} vs 复算 ${samples.map((s) => s.expect).join('/')}`,
+  );
+
+  const kOf = (s) => (hitOf(s).v / 255 - rimCheck.tone) / (1 - rimCheck.tone); // 从像素反推棱边 k
+  check(
+    'flat：远近两处 k 基本一致（衰减因子恒为 1）',
+    Math.abs(kOf(byMode.flat.far) - kOf(byMode.flat.near)) <= 0.05,
+    `k(d=${Math.round(byMode.flat.near.d)})=${kOf(byMode.flat.near).toFixed(3)}  k(d=${Math.round(byMode.flat.far.d)})=${kOf(byMode.flat.far).toFixed(3)}（朝向因子 ${byMode.flat.near.ndotl.toFixed(2)} / ${byMode.flat.far.ndotl.toFixed(2)}）`,
+  );
+  // 「衰减只在远处起作用」这句要成立，得真在光源附近量：d=118 处 f 已经掉到 0.89，
+  // 四档本来就不该相同。所以另外挑一段 d<40 的棱边来验收敛。
+  const close = rimCheck.closeUp;
+  check(
+    '最近的那段棱边处，四档亮度差 < 2/255（衰减因子的极限趋近 1）',
+    Boolean(close) && Math.abs(close.factor - 1) < 0.12,
+    close
+      ? `d=${Math.round(close.d)}：flat/local k=${close.k.toFixed(3)} 像素 ${close.profile.find((p) => Math.abs(p.v - close.expect) <= 2)?.v}/${close.expect}；画面里没有方块落在光源近旁（光源在两条放置带之间的空隙），这就是能取到的最小距离`
+      : '画面里没有可用的近段',
+  );
+  check(
+    '对照段（d≈118）已经能看出衰减：f<0.95，四档不再相同',
+    byMode.falloff.near.factor < 0.95 && Math.abs(byMode.flat.near.k - byMode.direct.near.k) > 0.1,
+    `d=${Math.round(byMode.flat.near.d)}：f=${byMode.falloff.near.factor.toFixed(3)}，k 从 flat ${byMode.flat.near.k.toFixed(3)} 掉到 direct ${byMode.direct.near.k.toFixed(3)}`,
+  );
+  check(
+    '远处亮度排序 flat ≥ local > falloff > direct（像素与模型同序）',
+    byMode.local.far.expect >= byMode.falloff.far.expect &&
+      byMode.falloff.far.expect > byMode.direct.far.expect &&
+      byMode.local.far.expect <= byMode.flat.far.expect + 1,
+    ['flat', 'falloff', 'direct', 'local'].map((m) => `${m}: 实测=${hitOf(byMode[m].far)?.v ?? '—'} 模型=${byMode[m].far.expect} k=${byMode[m].far.k.toFixed(3)}`).join('  '),
+  );
+  check(
+    '取光模式确实改变了远处棱边的亮度',
+    new Set(['flat', 'falloff', 'direct', 'local'].map((m) => byMode[m].far.expect)).size >= 3,
+    ['flat', 'falloff', 'direct', 'local'].map((m) => `${m}=${byMode[m].far.expect}`).join('  '),
+  );
+}
+
+// 下拉框本身要能改到设置：切到「取该处完整亮度」后，设置与画面都得跟着变
+await page.evaluate(() => {
+  const el = document.querySelector('#advanced [data-knob="rimLight"]');
+  el.value = 'local';
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+});
+await waitFrames(3);
+check(
+  '在下拉框里选一档即生效（设置与渲染同步）',
+  await page.evaluate(() => window.__RT2D__.settings.rimLight === 'local'),
+  `settings.rimLight = ${await page.evaluate(() => window.__RT2D__.settings.rimLight)}`,
+);
+await shoot('28-rim-local');
+await page.evaluate(() => {
+  const el = document.querySelector('#advanced [data-knob="rimLight"]');
+  el.value = 'flat';
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+});
+await waitFrames(2);
+check(
+  '切回固定亮度后设置复位',
+  await page.evaluate(() => window.__RT2D__.settings.rimLight === 'flat'),
+  `settings.rimLight = ${await page.evaluate(() => window.__RT2D__.settings.rimLight)}`,
+);
+
 await browser.close();
 ownServer?.kill();
 

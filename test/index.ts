@@ -13,11 +13,12 @@ import {
   rectsOverlap,
   type Rect,
 } from '../src/core/layout';
-import { settings, sampleSize } from '../src/settings';
+import { settings, blockFill, sampleSize, type Settings } from '../src/settings';
 import { makeRng } from '../src/core/math';
 import { Scene } from '../src/core/scene';
 import { makeRayHit, rayCast, type Segment } from '../src/core/segment';
 import { Visibility, VisibilityEngine } from '../src/core/visibility';
+import { collectRimSegments, glowFalloff, rimFactor } from '../src/render/rim';
 import { check, near, section, summary } from './harness';
 
 /** 测试自己用固定种子，跟产品行为（首次加载随机）无关 */
@@ -436,6 +437,128 @@ section('9. 参考图只用于拟合，不再复刻');
   const refYs = new Set(REFERENCE_BLOCKS.map((r) => r.y));
   const bothY = scene.blocks.filter((b) => refYs.has(b.y) && refXs.has(b.x));
   check('连「同一个 x 与 y 组合」都不出现', bothY.length === 0, `${bothY.length} 个`);
+}
+
+section('10. 棱边高光：四种取光模式');
+{
+  // 手搭两个方块：迎光棱（右棱）都完整可见，但离光源一近一远。
+  // 远的那个特意放高，否则它的右棱会被近的那个挡住（那样就没有高光可测了）。
+  const LIGHT = { x: 600, y: 360 };
+  const nearRect = { x: 420, y: 300, w: 100, h: 120 }; // 右棱 x=520 ⇒ d=100
+  const farRect = { x: 100, y: 20, w: 140, h: 120 };   // 右棱 x=240 ⇒ d≈430
+  const scene = makeScene([nearRect, farRect], LIGHT.x, LIGHT.y);
+  engine.compute(LIGHT.x, LIGHT.y, scene.segments, scene.segmentCount, opts('exact'), vis);
+
+  // 注意用 visibleInstanceCount：instances 数组是复用的池子，后面还留着上一批世界的残留
+  const model = { instanceCount: scene.visibleInstanceCount, instances: scene.instances, segments: scene.segments, vis, light: LIGHT };
+  const fill = blockFill();
+
+  /** 某个方块右棱上的亮段（迎光、被照亮的那条） */
+  const rimOf = (instIndex: number, mode: Settings['rimLight']) => {
+    settings.rimLight = mode;
+    const inst = scene.instances[instIndex];
+    const rightX = inst.x + inst.w;
+    const segs = collectRimSegments(model, fill).filter(
+      (s) => Math.abs(s.x0 - rightX) < 1e-6 && Math.abs(s.x1 - rightX) < 1e-6,
+    );
+    return { inst, segs };
+  };
+
+  const savedDir = settings.directShare;
+  const savedStrength = settings.rimStrength;
+  const savedMode = settings.rimLight;
+  settings.rimStrength = 0.46;
+  settings.directShare = 0.62;
+
+  /** 亮段中点离光源的距离 */
+  const midDist = (rim: { x0: number; y0: number; x1: number; y1: number }) =>
+    Math.hypot((rim.x0 + rim.x1) / 2 - LIGHT.x, (rim.y0 + rim.y1) / 2 - LIGHT.y);
+
+  /** 复算某条亮段应当是什么颜色（与实现同一套公式，但读的是它自己的中点/法线） */
+  const expected = (seg3: Segment, rim: { x0: number; y0: number; x1: number; y1: number }, mode: Settings['rimLight']) => {
+    const mx = (rim.x0 + rim.x1) / 2;
+    const my = (rim.y0 + rim.y1) / 2;
+    const dist = midDist(rim);
+    const ndotl = Math.max(0, (-(mx - LIGHT.x) * seg3.nx - (my - LIGHT.y) * seg3.ny) / dist);
+    const k = settings.rimStrength * (0.3 + 0.7 * ndotl) * rimFactor(dist, mode);
+    return { lit: fill[0] + (1 - fill[0]) * k, dist };
+  };
+
+  const levels: Record<string, { near: number; far: number }> = {};
+  const dists: Record<string, number> = {};
+  for (const mode of ['flat', 'falloff', 'direct', 'local'] as const) {
+    const a = rimOf(0, mode);
+    const b = rimOf(1, mode);
+    check(`${mode}: 两个方块的迎光棱都被照亮`, a.segs.length >= 1 && b.segs.length >= 1, `${a.segs.length} / ${b.segs.length} 段`);
+
+    // 逐段核对颜色是否就是那个模型算出来的值
+    const dir = scene.segments[a.inst.segIds[1]];
+    const farSeg = scene.segments[b.inst.segIds[1]];
+    const errs = [
+      ...a.segs.map((s) => Math.abs(s.r - expected(dir, s, mode).lit)),
+      ...b.segs.map((s) => Math.abs(s.r - expected(farSeg, s, mode).lit)),
+    ];
+    const worst = Math.max(...errs);
+    check(`${mode}: 每段颜色都等于模型值`, worst < 1e-12, `最大误差 ${worst.toExponential(2)}`);
+
+    levels[mode] = { near: a.segs[0].r, far: b.segs[0].r };
+    dists[mode] = expected(farSeg, b.segs[0], mode).dist;
+  }
+
+  // 近的那个棱中点正好在光源水平线上（d=100），远的那个明显更远
+  check('两处方块确实一近一远', dists.flat > 300 && dists.flat < 500, `远处亮段中点 d=${dists.flat.toFixed(1)}，近处 d≈100`);
+
+  // flat：同一段棱在不同远近下「朝向因子」相同 ⇒ 颜色必须一致（衰减因子恒为 1）
+  const flatNear = rimOf(0, 'flat');
+  const flatFar = rimOf(1, 'flat');
+  const nearEdgeSeg = scene.segments[flatNear.inst.segIds[1]];
+  const farEdgeSeg = scene.segments[flatFar.inst.segIds[1]];
+  const ratio = (rim: { x0: number; y0: number; x1: number; y1: number }, seg3: Segment) => {
+    const e = expected(seg3, rim, 'flat');
+    return (e.lit - fill[0]) / (1 - fill[0]); // 去掉底面后的 k
+  };
+  const kNear = ratio(flatNear.segs[0], nearEdgeSeg);
+  const kFar = ratio(flatFar.segs[0], farEdgeSeg);
+  const factorNear = rimFactor(expected(nearEdgeSeg, flatNear.segs[0], 'flat').dist, 'flat');
+  const factorFar = rimFactor(expected(farEdgeSeg, flatFar.segs[0], 'flat').dist, 'flat');
+  check('flat 模式两处的衰减因子都是 1（与远近无关）', factorNear === 1 && factorFar === 1, `${factorNear} / ${factorFar}`);
+  check(
+    'flat 模式两处 k 都只由朝向决定（差 ≤ 朝向项）',
+    Math.abs(kFar / kNear - 1) < 0.5,
+    `k近=${kNear.toFixed(3)} k远=${kFar.toFixed(3)}（朝向因子 ${(0.3 + 0.7 * 1).toFixed(2)} 已计入）`,
+  );
+
+  // 其余三档：远处必然更暗，且按 local > falloff > direct 排序
+  for (const mode of ['falloff', 'direct', 'local'] as const) {
+    check(`${mode}: 远处的棱边更暗`, levels[mode].far < levels[mode].near - 1e-6, `${levels[mode].far.toFixed(4)} < ${levels[mode].near.toFixed(4)}`);
+  }
+  check(
+    '远处亮度排序 local > falloff > direct',
+    levels.local.far > levels.falloff.far && levels.falloff.far > levels.direct.far,
+    `${levels.local.far.toFixed(4)} > ${levels.falloff.far.toFixed(4)} > ${levels.direct.far.toFixed(4)}`,
+  );
+
+  // 三档与「地板亮度曲线」逐项对齐：flat=1，falloff=f，direct=direct·f，local=ds+direct·f
+  const dFar = midDist(flatFar.segs[0]);
+  const f = glowFalloff(dFar);
+  const modelAt = (m: Settings['rimLight']) => expected(farEdgeSeg, flatFar.segs[0], m).lit;
+  near('falloff 远处 = 底面 + 衰减·(白 - 底面)', levels.falloff.far, modelAt('falloff'), 1e-12);
+  near('direct 远处 = 底面 + 直接光份额·衰减', levels.direct.far, modelAt('direct'), 1e-12);
+  near('local 远处 = 底面 + 完整亮度曲线', levels.local.far, modelAt('local'), 1e-12);
+  check('三档的亮度差正好由 f 解释', Math.abs(levels.falloff.far - levels.direct.far) > 1e-3 && f > 0 && f < 1, `f(d=${dFar.toFixed(0)})=${f.toFixed(3)}`);
+
+  // 最远处仍有环境光那一份：local 的下限就是 ds
+  near('local 在辉光半径之外仍保留环境光份额', rimFactor(1e6, 'local'), 1 - settings.directShare, 1e-12);
+  near('falloff / direct 在辉光半径之外归零', rimFactor(settings.glowRadius, 'falloff') + rimFactor(1e6, 'direct'), 0, 1e-12);
+
+  // 强度为 0 时，四档都退化成底色（棱边消失）
+  settings.rimStrength = 0;
+  const zero = (['flat', 'falloff', 'direct', 'local'] as const).map((m) => rimOf(1, m).segs[0].r);
+  check('高光强度为 0 时棱边退化为底色', zero.every((v) => Math.abs(v - fill[0]) < 1e-12), zero.map((v) => v.toFixed(3)).join(' / '));
+
+  settings.rimStrength = savedStrength;
+  settings.directShare = savedDir;
+  settings.rimLight = savedMode;
 }
 
 summary();

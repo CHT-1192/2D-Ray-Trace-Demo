@@ -1,6 +1,7 @@
 import { umbraQuad } from '../core/shadow';
 import { blockFill, bulbStops, settings } from '../settings';
 import { MeshBuilder } from './mesh';
+import { collectRimSegments } from './rim';
 import { BG_FRAG, FLAT_FRAG, FLAT_VERT, LIT_FRAG, POS_VERT, SHADOW_FRAG } from './shaders';
 import type { RenderModel, Renderer } from './types';
 
@@ -382,39 +383,16 @@ export class WebGL2Renderer implements Renderer {
 
     // ── 方块本体 + 被照亮的棱边
     if (o.showBlocks) {
-      const [fr, fg, fb] = blockFill();
+      const fill = blockFill();
+      const [fr, fg, fb] = fill;
       const count = model.instanceCount;
       for (let i = 0; i < count; i++) {
         const inst = model.instances[i];
         m.rect(inst.x, inst.y, inst.w, inst.h, fr, fg, fb, 1);
       }
       const halfWidth = settings.rimWidth * model.pxScale;
-      for (let i = 0; i < count; i++) {
-        const inst = model.instances[i];
-        for (let e = 0; e < 4; e++) {
-          const segId = inst.segIds[e];
-          const seg = model.segments[segId];
-          if (!seg || seg.id !== segId) continue;
-          const spans = model.vis.litSpan(segId);
-          if (!spans) continue;
-          for (let s = 0; s < spans.length; s += 2) {
-            const x0 = seg.ax + seg.ex * spans[s];
-            const y0 = seg.ay + seg.ey * spans[s];
-            const x1 = seg.ax + seg.ex * spans[s + 1];
-            const y1 = seg.ay + seg.ey * spans[s + 1];
-            const dx = x1 - x0;
-            const dy = y1 - y0;
-            const len = Math.hypot(dx, dy);
-            if (len < 0.5) continue;
-            // 这一小段棱边朝向光源的程度
-            const mx = (x0 + x1) * 0.5 - light.x;
-            const my = (y0 + y1) * 0.5 - light.y;
-            const dist = Math.hypot(mx, my) || 1;
-            const ndotl = Math.max(0, (-mx * seg.nx - my * seg.ny) / dist);
-            const k = settings.rimStrength * (0.3 + 0.7 * ndotl);
-            m.thickLine(x0, y0, x1, y1, halfWidth, fr + (1 - fr) * k, fg + (1 - fg) * k, fb + (1 - fb) * k, 1);
-          }
-        }
+      for (const rim of collectRimSegments(model, fill)) {
+        m.thickLine(rim.x0, rim.y0, rim.x1, rim.y1, halfWidth, rim.r, rim.g, rim.b, 1);
       }
     }
     this.alphaVerts = m.vertexCount - start;

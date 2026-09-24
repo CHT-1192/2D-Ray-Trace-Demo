@@ -497,6 +497,29 @@ kbd {
   text-align: right;
 }
 
+/* 下拉型参数：标签占满一行，控件自己一行（选项文字比数值长得多） */
+.knob-choice {
+  grid-template-columns: 72px 1fr;
+}
+
+.knob-choice select {
+  grid-column: 2 / -1;
+  width: 100%;
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 10.5px;
+  cursor: pointer;
+}
+
+.knob-choice select:focus-visible {
+  outline: 1px solid var(--accent-dim);
+  outline-offset: 1px;
+}
+
 .panel-adv footer {
   padding-top: 8px;
   border-top: 1px solid var(--line);

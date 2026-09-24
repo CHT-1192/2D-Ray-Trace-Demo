@@ -49,7 +49,13 @@ export const THEME = {
     [9.5, 0.02],
     [13, 0],
   ] as ReadonlyArray<readonly [number, number]>,
-  /** 方块朝向光源那条棱的高光强度 */
+  /**
+   * 方块朝向光源那条棱的高光强度。
+   *
+   * 注意这是「把方块底色往白里推多少」，跟画面亮度是两套标尺：
+   * 棱边画在**不透明的方块本体**之上，所以它不可能是「该处地板亮度」本身，
+   * 只能表示「这块表面如果被照到会有多亮」，通过把底色推向白来实现。
+   */
   rimStrength: 0.46,
   /** 外墙到视口的额外距离：射线兜底，保证可见多边形永远闭合 */
   wallMargin: 120,
@@ -57,6 +63,15 @@ export const THEME = {
 
 /** 三种可见性算法。 */
 export type VisibilityMode = 'exact' | 'edge' | 'uniform';
+
+/**
+ * 棱边高光的亮度来源。
+ *
+ * `flat` 是原先的行为：亮度只由朝向决定，与远近无关 —— 每条迎光棱都一样亮。
+ * 另外三档把「该棱所在位置的地板亮度」引进来，用的是与背景/直接光完全相同的那套模型
+ * （`glowAmp · 比例 · f(d)`，见 `render/rim.ts`），所以只是多乘一个衰减因子。
+ */
+export type RimLight = 'flat' | 'falloff' | 'direct' | 'local';
 
 export const MODE_LABEL: Record<VisibilityMode, string> = {
   exact: '精确锁定边缘',

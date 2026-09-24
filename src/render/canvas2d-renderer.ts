@@ -2,11 +2,16 @@ import { WORLD_H } from '../config';
 import { umbraQuad } from '../core/shadow';
 import { blockFill, bulbStops, settings } from '../settings';
 import { falloffStops } from './mesh';
+import { collectRimSegments } from './rim';
 import type { RenderModel, Renderer } from './types';
 
 function gray(v: number): string {
-  const c = Math.max(0, Math.min(255, Math.round(v * 255)));
+  const c = toByte(v);
   return `rgb(${c},${c},${c})`;
+}
+
+function toByte(v: number): number {
+  return Math.max(0, Math.min(255, Math.round(v * 255)));
 }
 
 /**
@@ -127,32 +132,12 @@ export class Canvas2DRenderer implements Renderer {
 
       ctx.lineCap = 'butt';
       ctx.lineWidth = settings.rimWidth * 2 * model.pxScale;
-      for (let i = 0; i < count; i++) {
-        const inst = model.instances[i];
-        for (let e = 0; e < 4; e++) {
-          const segId = inst.segIds[e];
-          const seg = model.segments[segId];
-          if (!seg || seg.id !== segId) continue;
-          const spans = model.vis.litSpan(segId);
-          if (!spans) continue;
-          for (let s = 0; s < spans.length; s += 2) {
-            const x0 = seg.ax + seg.ex * spans[s];
-            const y0 = seg.ay + seg.ey * spans[s];
-            const x1 = seg.ax + seg.ex * spans[s + 1];
-            const y1 = seg.ay + seg.ey * spans[s + 1];
-            if (Math.hypot(x1 - x0, y1 - y0) < 0.5) continue;
-            const mx = (x0 + x1) * 0.5 - light.x;
-            const my = (y0 + y1) * 0.5 - light.y;
-            const dist = Math.hypot(mx, my) || 1;
-            const ndotl = Math.max(0, (-mx * seg.nx - my * seg.ny) / dist);
-            const k = settings.rimStrength * (0.3 + 0.7 * ndotl);
-            ctx.strokeStyle = gray(fr + (1 - fr) * k);
-            ctx.beginPath();
-            ctx.moveTo(x0, y0);
-            ctx.lineTo(x1, y1);
-            ctx.stroke();
-          }
-        }
+      for (const rim of collectRimSegments(model, blockFill())) {
+        ctx.strokeStyle = `rgb(${toByte(rim.r)},${toByte(rim.g)},${toByte(rim.b)})`;
+        ctx.beginPath();
+        ctx.moveTo(rim.x0, rim.y0);
+        ctx.lineTo(rim.x1, rim.y1);
+        ctx.stroke();
       }
     }
 

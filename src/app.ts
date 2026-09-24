@@ -3,8 +3,9 @@ import { randomSeed } from './core/math';
 import { Scene } from './core/scene';
 import { Visibility, VisibilityEngine } from './core/visibility';
 import { createRenderer } from './render';
+import { collectRimSegments } from './render/rim';
 import type { RenderModel } from './render/types';
-import { settings, type Settings } from './settings';
+import { blockFill, settings, type Settings } from './settings';
 import { CostMeter } from './timing';
 import { AdvancedPanel } from './ui/advanced-panel';
 import { Hud, type Stats } from './ui/hud';
@@ -277,6 +278,18 @@ function boot(): void {
     blockerCount: (x: number, y: number) => scene.blockerCount(x, y),
     applySeed,
     getSeed: () => scene.seed,
+    /** 当前帧真正会被画出来的棱边亮段（验证脚本用它核对像素与模型是否一致） */
+    rimSegments: () =>
+      collectRimSegments(
+        {
+          instanceCount: scene.visibleInstanceCount,
+          instances: scene.instances,
+          segments: scene.segments,
+          vis,
+          light: scene.light,
+        },
+        blockFill(),
+      ),
   };
 }
 
