@@ -1,0 +1,70 @@
+# 把构建产物发布到 GitHub Pages —— 每次推送到 main 自动跑一遍。
+#
+# 站点是纯静态的：scripts/build.mjs 把 public/ 与 esbuild 打出的 bundle 组装进 dist/，
+# 没有服务端、没有运行时依赖，所以这里只做「构建 → 上传 → 发布」三步。
+#
+# 发布地址：https://cht-1192.github.io/2D-Ray-Trace-Demo/
+#
+# 与本地预览（npm start → http://127.0.0.1:6850/）共用同一份构建脚本，产物一致；
+# 差别只有部署路径是子目录 /2D-Ray-Trace-Demo/，而 public/index.html 里的资源
+# 全是相对路径（./app.js、./styles.css），根路径与子路径下都能直接跑，
+# 构建时不需要额外的 base 配置。
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# GITHUB_TOKEN 的最小权限：读仓库、写 Pages、申请 id-token 走 OIDC 发布
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同一时刻只允许一个发布在跑；排队中的旧任务直接取消，但不打断正在进行的发布
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 构建
+        run: npm run build
+
+      - name: 静态检查（类型）
+        run: npm run typecheck
+
+      # 页面本身没有路由，404.html 只在有人手滑敲错地址时兜底回到 Demo
+      - name: 补充 Pages 需要的文件
+        run: |
+          touch dist/.nojekyll          # 关掉 Jekyll，避免下划线开头的文件被吃掉
+          cp dist/index.html dist/404.html
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
