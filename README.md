@@ -10,6 +10,8 @@
 
 <sub>截图对应的世界：`#seed=20260910`（首次打开会随机挑一颗种子，所以每个人看到的都不一样）</sub>
 
+**不想装环境就直接看在线版**：<https://cht-1192.github.io/2D-Ray-Trace-Demo/>
+
 `npm test` 用一套独立实现（极密角度扫描求可见面积）当裁判，实测：
 
 | 算法 | 每帧射线数 | 可见面积相对误差 |
@@ -32,12 +34,22 @@ npm start                 # http://127.0.0.1:6850
 - `npm start` —— 构建 + 起静态服务器（**零依赖** Node http 服务，`server/server.mjs`）
 - `npm run dev` —— 监听 `src/`、`public/`，改动自动重建 + 页面自动刷新
 - `npm run build` —— 产出 `dist/`（站点）与 `dist/standalone.html`（**单文件版**）
-- `npm test` —— 几何 / 可见性 / 生成器自检（Node 里跑，33 项）
-- `npm run verify` —— Playwright + Chromium 端到端验证（62 项，见下文）
+- `npm test` —— 几何 / 可见性 / 生成器自检（Node 里跑，39 项）
+- `npm run verify` —— Playwright + Chromium 端到端验证（66 项，见下文）
 - `npm run typecheck` —— `tsc --noEmit`
 
 **单文件版**：直接双击 `dist/standalone.html`（CSS/JS 全部内联，`file://` 可用，无需服务器与构建）。
 它是交付物，所以跟源码一起提交进了仓库；其余构建产物不入库，`npm run build` 可随时重新生成。
+
+## 部署（GitHub Pages）
+
+线上地址 <https://cht-1192.github.io/2D-Ray-Trace-Demo/>，**每次推送到 `main` 自动重新构建发布**：
+
+`.github/workflows/pages.yml` 只做三步 —— `npm ci` → `npm run build` → `npm run typecheck`，然后把 `dist/` 交给官方 Pages Actions 发布。没有为 CI 另写一套构建逻辑，本地 `npm run build` 与线上产物同源；`public/index.html` 里的资源都是相对路径，部署到子目录不需要任何 base 配置。发布前会补两个文件：`.nojekyll`（关掉 Jekyll 处理）与 `404.html`（地址敲错时兜底回 Demo）。
+
+仓库的 Pages 构建源设成了 **GitHub Actions**（不是分支），所以 `gh-pages` 分支不存在也不需要；只要 Actions 是启用状态，推送即上线，进度在仓库的 Actions 标签页可见。
+
+**在线版**：<https://cht-1192.github.io/2D-Ray-Trace-Demo/>。GitHub Actions（`.github/workflows/pages.yml`）在每次推送到 `main` 时跑 `npm ci` → `npm run build` → `npm run typecheck`，把 `dist/` 发布到 Pages；本地与 CI 共用同一份构建脚本，产物一致。资源全是相对路径，所以子目录部署不需要额外配置。
 
 ## 操作
 
@@ -124,6 +136,7 @@ npm start                 # http://127.0.0.1:6850
 │   └── ui/
 │       ├── hud.ts              控制面板（纯 DOM 覆盖层）
 │       └── input.ts            键盘 / 指针
+├── .github/workflows/pages.yml 推送 main 自动构建并发布到 GitHub Pages
 ├── server/server.mjs           零依赖静态服务器（缺 dist 会自动构建）
 ├── scripts/
 │   ├── build.mjs               esbuild 打包 + 单文件版内联 + watch
